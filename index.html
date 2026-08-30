@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1F2A44">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Reading Passport">
+<title>Reading Passport</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231F2A44'/%3E%3Ctext y='72' x='50' font-size='58' text-anchor='middle'%3E📚%3C/text%3E%3C/svg%3E">
+
+<!-- ============================================================
+     READING PASSPORT
+     A single-file reading tracker. No build step, no dependencies.
+
+     TO TURN ON SHARED SYNC (so two parents see the same data),
+     fill in the two values in the CONFIG block near the top of
+     the script at the bottom of this file. Leave them blank and
+     the app saves to this device only.
+     ============================================================ -->
+
+<style>
+:root{
+  --ink:#1F2A44; --ink-soft:#3C4A6B;
+  --parchment:#FBF3E1; --parchment-deep:#F3E6C8;
+  --marigold:#F2A93B; --marigold-deep:#D98E1F;
+  --coral:#EF6F6C; --coral-deep:#D8534F;
+  --sage:#5FA98A; --sage-deep:#43836B;
+  --plum:#7C5CBF; --plum-deep:#5F429A;
+  --paper:#FFFDF8;
+  --display:'Baloo 2','Trebuchet MS','Segoe UI',sans-serif;
+  --body:'Nunito','Segoe UI',system-ui,sans-serif;
+  --score:'Space Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap');
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--parchment);font-family:var(--body);color:var(--ink);-webkit-text-size-adjust:100%}
+body{padding-bottom:env(safe-area-inset-bottom)}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select,textarea{font-family:inherit;font-size:16px}
+.wrap{max-width:1000px;margin:0 auto;padding:0 18px}
+
+/* ---------- header ---------- */
+.topbar{background:var(--ink);padding:26px 0 18px;position:sticky;top:0;z-index:30;box-shadow:0 2px 10px rgba(31,42,68,.18);padding-top:calc(26px + env(safe-area-inset-top))}
+.topbar-row{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.eyebrow{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--marigold)}
+.topbar h1{font-family:var(--display);font-size:28px;font-weight:800;color:#fff;line-height:1.1}
+.bank{display:flex;align-items:center;gap:9px;background:var(--marigold);border-radius:16px;padding:9px 15px;flex-shrink:0}
+.bank .n{font-family:var(--score);font-weight:700;font-size:22px;line-height:1;display:block}
+.bank .l{font-size:10px;font-weight:800;line-height:1.4}
+.chips{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px}
+.chip{font-size:11px;font-weight:800;color:var(--parchment-deep);display:flex;align-items:center;gap:5px}
+
+/* ---------- generic ---------- */
+section{margin-bottom:38px}
+h2.sec{font-family:var(--display);font-size:19px;font-weight:700;display:flex;align-items:center;gap:9px;margin-bottom:14px}
+.count{font-family:var(--score);font-size:11px;font-weight:400;background:var(--parchment-deep);color:var(--ink-soft);padding:2px 9px;border-radius:99px}
+.muted{color:var(--ink-soft);font-size:14px}
+.grid{display:grid;grid-template-columns:1fr;gap:18px}
+@media(min-width:640px){.grid{grid-template-columns:1fr 1fr}}
+@media(min-width:980px){.grid{grid-template-columns:1fr 1fr 1fr}}
+.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:800;color:#fff}
+.btn{border-radius:99px;font-family:var(--display);font-weight:700;color:#fff;padding:10px 18px;display:inline-flex;align-items:center;justify-content:center;gap:7px;font-size:15px;transition:transform .12s}
+.btn:active{transform:scale(.96)}
+.btn.coral{background:var(--coral)} .btn.sage{background:var(--sage)}
+.btn.plum{background:var(--plum)} .btn.ink{background:var(--ink)}
+.btn.ghost{background:var(--parchment-deep);color:var(--ink)}
+.btn:disabled{background:var(--parchment-deep);color:var(--ink-soft);cursor:not-allowed}
+.linky{font-size:11px;font-weight:800;color:var(--ink-soft);text-decoration:underline}
+
+/* ---------- book cards ---------- */
+.card{background:var(--paper);border-radius:22px;padding:16px;display:flex;flex-direction:column;gap:12px;box-shadow:0 3px 12px rgba(31,42,68,.09);border:3px solid var(--parchment-deep)}
+.card-top{display:flex;gap:13px}
+.cover{width:92px;height:134px;border-radius:6px;position:relative;overflow:hidden;flex-shrink:0;box-shadow:0 6px 16px rgba(31,42,68,.22);display:flex;flex-direction:column;justify-content:space-between;padding:10px 9px 8px 17px}
+.cover .spine{position:absolute;left:0;top:0;bottom:0;width:8px;background:rgba(0,0,0,.22);border-right:1px solid rgba(255,255,255,.28)}
+.cover .mark{position:absolute;font-size:66px;right:-11px;bottom:-13px;opacity:.17;line-height:1}
+.cover .t{font-family:var(--display);font-weight:800;color:#fff;font-size:12px;line-height:1.15;position:relative;text-shadow:0 1px 3px rgba(0,0,0,.3)}
+.cover .rule{height:2px;width:42%;background:rgba(255,255,255,.65);margin-top:6px;position:relative}
+.cover .a{font-size:8px;font-weight:700;color:rgba(255,255,255,.9);position:relative}
+.cover img{width:100%;height:100%;object-fit:cover}
+.bk-title{font-family:var(--display);font-weight:700;font-size:16px;line-height:1.15}
+.bk-author{font-size:12px;color:var(--ink-soft)}
+.tags{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:7px}
+.genre-line{font-size:11px;font-weight:800;width:100%;margin-top:2px}
+.bar{height:10px;border-radius:99px;background:var(--parchment-deep);overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:99px;transition:width .5s}
+.barlab{display:flex;justify-content:space-between;font-size:11px;font-weight:800;margin-bottom:5px}
+.fact{font-size:12px;line-height:1.45;background:rgba(124,92,191,.09);padding:10px;border-radius:12px;margin-top:8px}
+.factbtn{font-size:12px;font-weight:800;color:var(--plum);display:flex;align-items:center;gap:5px}
+.row2{display:flex;gap:8px}
+.row2>.btn{flex:1;font-size:14px;padding:9px 10px}
+
+/* ---------- streak ---------- */
+.streak{background:var(--paper);border:3px solid var(--marigold);border-radius:24px;padding:22px;margin-bottom:38px}
+.streak-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.flame{font-size:40px;line-height:1}
+.flame.on{animation:flicker 1.8s ease-in-out infinite}
+@keyframes flicker{0%,100%{transform:scale(1) rotate(-2deg)}50%{transform:scale(1.09) rotate(2deg)}}
+.streak-n{font-family:var(--score);font-weight:700;font-size:30px;line-height:1}
+.streak-n span{font-family:var(--body);font-size:15px;font-weight:800}
+.dots{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:26px}
+.dot{width:22px;height:22px;border-radius:99px;display:flex;align-items:center;justify-content:center;font-family:var(--score);font-size:9px;background:var(--parchment-deep);color:var(--ink-soft)}
+.dot.read{background:var(--marigold);color:var(--ink);font-weight:700}
+.dot.today{border:2px solid var(--coral)}
+.dot.future{background:transparent;border:1px dashed var(--parchment-deep);opacity:.55}
+.track{position:relative;margin-bottom:8px}
+.track .bar{height:12px}
+.nodes{position:relative;height:0}
+.node{position:absolute;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;width:88px;top:-30px}
+.node .k{width:26px;height:26px;border-radius:99px;display:flex;align-items:center;justify-content:center;background:var(--paper);border:2px solid var(--parchment-deep);font-family:var(--score);font-size:11px;color:var(--ink-soft);box-shadow:0 2px 5px rgba(31,42,68,.12)}
+.node.done .k{background:var(--sage);border-color:var(--sage-deep);color:#fff;font-weight:700}
+.node .e{font-size:19px;margin-top:9px;line-height:1}
+.node .lab{font-size:10px;font-weight:800;line-height:1.2;text-align:center;margin-top:2px}
+.node .sub{font-size:9px;color:var(--ink-soft);text-align:center}
+.track-space{height:96px}
+
+/* ---------- shelves / prizes ---------- */
+.shelf{background:rgba(243,230,200,.6);border-bottom:6px solid var(--ink-soft);border-radius:16px;padding:20px;overflow-x:auto}
+.shelf-row{display:flex;gap:16px}
+.fin{width:104px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:5px}
+.fin .badge{position:absolute;top:-8px;right:-8px;width:30px;height:30px;border-radius:99px;background:var(--sage);border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:15px}
+.fin .rel{position:relative}
+.fin .n{font-size:11px;font-weight:800;text-align:center;line-height:1.2}
+.prizes{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:560px){.prizes{grid-template-columns:1fr 1fr}}
+@media(min-width:900px){.prizes{grid-template-columns:1fr 1fr 1fr}}
+.prize{background:var(--paper);border:2px solid var(--parchment-deep);border-radius:16px;padding:15px;display:flex;flex-direction:column;gap:10px}
+.prize.ready{border-color:var(--sage)}
+.prize-head{display:flex;align-items:center;gap:10px}
+.prize-head .e{font-size:24px}
+.prize-name{font-size:14px;font-weight:800;line-height:1.25}
+.prize-cost{font-family:var(--score);font-size:12px;color:var(--marigold-deep)}
+.prize-note{font-size:11px;font-weight:800;margin-top:6px;color:var(--ink-soft)}
+.prize.ready .prize-note{color:var(--sage-deep)}
+.logrow{display:flex;align-items:center;gap:12px;background:var(--paper);border:1px solid var(--parchment-deep);border-radius:12px;padding:10px 12px;margin-bottom:6px}
+.logrow .d{font-family:var(--score);font-size:11px;color:var(--ink-soft);width:52px;flex-shrink:0}
+.logrow .t{font-size:14px;font-weight:800;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.logrow .v{font-family:var(--score);font-size:11px;color:var(--plum-deep);flex-shrink:0}
+.banner{background:rgba(95,169,138,.14);border:2px solid var(--sage);border-radius:16px;padding:15px;display:flex;gap:12px;margin-bottom:30px}
+.banner h3{font-family:var(--display);font-size:16px;color:var(--sage-deep)}
+.banner p{font-size:14px}
+
+/* ---------- parent ---------- */
+.phead{background:var(--paper);border-bottom:1px solid var(--parchment-deep);padding:22px 0 16px;padding-top:calc(22px + env(safe-area-inset-top))}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-top:16px}
+.tab{padding:9px 15px;border-radius:12px;font-size:14px;font-weight:800;color:var(--ink-soft)}
+.tab.on{background:var(--ink);color:#fff}
+.panel{background:var(--paper);border:1px solid var(--parchment-deep);border-radius:16px;padding:16px;margin-bottom:18px}
+label.f{display:block;font-size:12px;font-weight:800;margin-bottom:5px}
+.in{width:100%;padding:9px 12px;border-radius:12px;border:2px solid var(--parchment-deep);background:#fff;outline:none}
+.in:focus{border-color:var(--marigold)}
+.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:28px}
+@media(min-width:760px){.stats{grid-template-columns:repeat(4,1fr)}}
+.stat{background:var(--paper);border:1px solid var(--parchment-deep);border-radius:16px;padding:15px}
+.stat .n{font-family:var(--score);font-weight:700;font-size:23px;margin-top:6px}
+.stat .n.txt{font-family:var(--display);font-size:16px}
+.stat .l{font-size:12px;color:var(--ink-soft);margin-top:2px}
+.editrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--paper);border:1px solid var(--parchment-deep);border-radius:12px;padding:10px;margin-bottom:8px}
+.mini{width:74px;padding:5px 8px;border-radius:8px;border:1px solid var(--parchment-deep);font-family:var(--score);font-size:12px}
+.libitem{display:flex;gap:12px;background:var(--paper);border:1px solid var(--parchment-deep);border-radius:12px;padding:12px}
+.libgrid{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:700px){.libgrid{grid-template-columns:1fr 1fr}}
+.trash{color:var(--coral-deep);padding:5px;align-self:flex-start}
+
+/* ---------- modal / toast ---------- */
+.modal-bg{position:fixed;inset:0;background:rgba(31,42,68,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:60}
+.modal{background:var(--paper);border-radius:22px;padding:24px;width:100%;max-width:380px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+.modal h3{font-family:var(--display);font-size:20px;font-weight:800}
+.stars{display:flex;gap:5px;margin:14px 0 20px}
+.star{font-size:30px;line-height:1;filter:grayscale(1);opacity:.35}
+.star.on{filter:none;opacity:1}
+.calc{background:rgba(242,169,59,.16);border-radius:14px;padding:12px;margin-bottom:18px}
+.calc .l{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-soft);margin-bottom:5px}
+.calc .tot{display:flex;justify-content:space-between;font-size:14px;font-weight:800;padding-top:7px;border-top:1px solid rgba(242,169,59,.5)}
+.toast{position:fixed;top:96px;left:50%;transform:translateX(-50%);background:var(--marigold);color:var(--ink);font-family:var(--display);font-weight:800;padding:11px 22px;border-radius:99px;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:70;animation:up 1.8s ease forwards}
+@keyframes up{0%{opacity:1;transform:translate(-50%,0)}75%{opacity:1}100%{opacity:0;transform:translate(-50%,-40px)}}
+.sync{position:fixed;bottom:12px;right:12px;font-size:10px;font-family:var(--score);background:var(--ink);color:var(--parchment-deep);padding:5px 10px;border-radius:99px;opacity:.75;z-index:20}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal"></div>
+<div id="toast"></div>
+<div class="sync" id="sync"></div>
+
+<script>
+/* ============================================================
+   CONFIG — shared sync
+   Leave both blank to save on this device only.
+   Fill both in to sync between phones (see setup steps).
+   ============================================================ */
+const SUPABASE_URL = "";   // e.g. "https://abcdefgh.supabase.co"
+const SUPABASE_KEY = "";   // the "anon public" key
+const SYNC_ROW_ID  = "hannah";
+const KID_NAME     = "Hannah";
+
+/* ============================================================ */
+
+const SYNC_ON = !!(SUPABASE_URL && SUPABASE_KEY);
+const LS_KEY = "reading-passport-v1";
+
+const GENRES = {
+  "Animal Friends":{c:"var(--sage)",e:"🐾"}, "Silly":{c:"var(--marigold)",e:"🤪"},
+  "Everyday Adventures":{c:"var(--coral)",e:"🏡"}, "School Life":{c:"var(--plum)",e:"🎒"},
+  "Adventure":{c:"var(--marigold-deep)",e:"🧭"}, "Friendship":{c:"var(--coral)",e:"🤝"},
+  "Mystery":{c:"var(--plum)",e:"🔍"}, "Fantasy":{c:"var(--plum)",e:"🐉"},
+  "Fantasy Adventure":{c:"var(--plum-deep)",e:"⚡"}, "Everyday Life":{c:"var(--sage-deep)",e:"🌼"},
+  "Other":{c:"var(--ink-soft)",e:"📘"}
+};
+const BANDS = ["K-1","1st-2nd","2nd-3rd","3rd-4th","4th-5th","5th+"];
+const DIFF = {"K-1":1,"1st-2nd":2,"2nd-3rd":2,"3rd-4th":3,"4th-5th":4,"5th+":5};
+
+const CATALOG = [
+ {title:"Frog and Toad Are Friends",author:"Arnold Lobel",grade:"K-1",pages:64,genre:"Animal Friends",fact:"A Caldecott Honor winner. Arnold Lobel drew every picture himself in soft, rounded lines to match the gentle friendship at its center."},
+ {title:"Green Eggs and Ham",author:"Dr. Seuss",grade:"K-1",pages:62,genre:"Silly",fact:"Dr. Seuss wrote this whole book using only 50 different words, after his editor bet him he couldn't do it."},
+ {title:"The Cat in the Hat",author:"Dr. Seuss",grade:"K-1",pages:61,genre:"Silly",fact:"This book was created to help kids learn to read, using a list of only 236 different words."},
+ {title:"Elephant and Piggie: We Are in a Book!",author:"Mo Willems",grade:"K-1",pages:57,genre:"Animal Friends",fact:"Mo Willems draws Piggie and Elephant with almost no background at all, so every bit of feeling has to come from their faces."},
+ {title:"Pete the Cat: I Love My White Shoes",author:"Eric Litwin",grade:"K-1",pages:40,genre:"Silly",fact:"No matter what Pete steps in, he never stops singing. The story was a song before it was ever a book."},
+ {title:"Fancy Nancy",author:"Jane O'Connor",grade:"1st-2nd",pages:32,genre:"Everyday Adventures",fact:"Nancy loves fancy words so much that the book quietly teaches a new vocabulary word on nearly every page."},
+ {title:"Henry and Mudge: The First Book",author:"Cynthia Rylant",grade:"1st-2nd",pages:48,genre:"Animal Friends",fact:"Mudge, Henry's dog, was inspired by a real and enormous English mastiff."},
+ {title:"Junie B. Jones and the Stupid Smelly Bus",author:"Barbara Park",grade:"2nd-3rd",pages:69,genre:"School Life",fact:"Junie B. talks exactly like a real kindergartner, grammar mistakes and all. That was on purpose."},
+ {title:"Magic Tree House: Dinosaurs Before Dark",author:"Mary Pope Osborne",grade:"2nd-3rd",pages:71,genre:"Adventure",fact:"This was the very first Magic Tree House book. There are now more than 60 of them."},
+ {title:"Ivy and Bean",author:"Annie Barrows",grade:"2nd-3rd",pages:122,genre:"Friendship",fact:"Ivy and Bean start out certain they'll never be friends. The whole first book is about how wrong they were."},
+ {title:"The Boxcar Children",author:"Gertrude Chandler Warner",grade:"2nd-3rd",pages:154,genre:"Mystery",fact:"The four Alden children furnish their entire hideout, dishes and beds and all, out of things other people threw away."},
+ {title:"Amelia Bedelia",author:"Peggy Parish",grade:"2nd-3rd",pages:64,genre:"Silly",fact:"Amelia Bedelia follows instructions completely literally, so when she's told to dress the chicken, she puts clothes on it."},
+ {title:"Judy Moody Was in a Mood",author:"Megan McDonald",grade:"3rd-4th",pages:160,genre:"School Life",fact:"Every chapter opens with Judy in a different mood, shown as a little mood-ring color."},
+ {title:"Ramona the Pest",author:"Beverly Cleary",grade:"3rd-4th",pages:192,genre:"Everyday Adventures",fact:"Beverly Cleary wrote Ramona because she noticed kids kept asking for books about ordinary families."},
+ {title:"The One and Only Ivan",author:"Katherine Applegate",grade:"3rd-4th",pages:305,genre:"Animal Friends",fact:"The story is based on a real gorilla named Ivan, who lived in a shopping mall enclosure for 27 years."},
+ {title:"Charlotte's Web",author:"E.B. White",grade:"3rd-4th",pages:184,genre:"Animal Friends",fact:"E.B. White kept a real barn with pigs and spiders, and said he wrote the book partly to make peace with the fact that farm animals don't live forever."},
+ {title:"James and the Giant Peach",author:"Roald Dahl",grade:"3rd-4th",pages:146,genre:"Fantasy",fact:"This was Roald Dahl's very first book written for children."},
+ {title:"Matilda",author:"Roald Dahl",grade:"3rd-4th",pages:240,genre:"Fantasy",fact:"Matilda's love of books came from Roald Dahl's own childhood habit of hiding away to read."},
+ {title:"The BFG",author:"Roald Dahl",grade:"3rd-4th",pages:208,genre:"Fantasy",fact:"The BFG mixes up his words on purpose. Dahl invented a whole vocabulary for him, like scrumdiddlyumptious."},
+ {title:"Diary of a Wimpy Kid",author:"Jeff Kinney",grade:"3rd-4th",pages:217,genre:"School Life",fact:"The book is written and drawn like a real notebook, because Jeff Kinney first imagined it as a comic for adults."},
+ {title:"Because of Winn-Dixie",author:"Kate DiCamillo",grade:"3rd-4th",pages:182,genre:"Animal Friends",fact:"Kate DiCamillo wrote this after adopting a dog who reminded her of home, and finished it in three months."},
+ {title:"Harry Potter and the Sorcerer's Stone",author:"J.K. Rowling",grade:"4th-5th",pages:309,genre:"Fantasy",fact:"J.K. Rowling thought of the idea on a delayed train with no pen handy, so she just sat and imagined it for four hours."},
+ {title:"Percy Jackson: The Lightning Thief",author:"Rick Riordan",grade:"4th-5th",pages:377,genre:"Fantasy Adventure",fact:"Rick Riordan first told these stories out loud to his son, who has dyslexia. That's why Percy does too."},
+ {title:"The Wild Robot",author:"Peter Brown",grade:"4th-5th",pages:277,genre:"Adventure",fact:"Peter Brown illustrated it himself, drawing Roz to look deliberately simple, like a robot built from spare parts."},
+ {title:"Wonder",author:"R.J. Palacio",grade:"4th-5th",pages:316,genre:"Everyday Life",fact:"R.J. Palacio got the idea after a real encounter with a child with a facial difference at an ice cream shop."}
+];
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+const today = () => new Date().toISOString().slice(0,10);
+const mKey = d => d.slice(0,7);
+const thisMonth = () => mKey(today());
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function defaultState(){
+  const seed = ["Frog and Toad Are Friends","Magic Tree House: Dinosaurs Before Dark","Charlotte's Web","Diary of a Wimpy Kid","Harry Potter and the Sorcerer's Stone","Ivy and Bean"];
+  return {
+    books: seed.map(t => Object.assign({id:uid(),coverUrl:""}, CATALOG.find(b=>b.title===t))),
+    log: [], reading: [], completions: [], redeemed: [], streakAwards: [],
+    rewards: [
+      {id:"r1",name:"Choose tonight's dessert",cost:30,emoji:"🍦"},
+      {id:"r2",name:"30 extra minutes of screen time",cost:50,emoji:"📱"},
+      {id:"r3",name:"Pick family movie night",cost:75,emoji:"🎬"},
+      {id:"r4",name:"$5 gift card",cost:150,emoji:"🎁"},
+      {id:"r5",name:"Trip to the bookstore for a new book",cost:300,emoji:"📚"},
+      {id:"r6",name:"Sleepover with a friend",cost:400,emoji:"🛏️"}
+    ],
+    milestones: [
+      {days:5,type:"points",value:10,label:"10 bonus points",emoji:"✨"},
+      {days:10,type:"prize",label:"$5 cash",emoji:"💵"},
+      {days:20,type:"prize",label:"Special Event",emoji:"🎪"},
+      {days:30,type:"prize",label:"Special Prize",emoji:"🏆"}
+    ],
+    config: {pagesPerPoint:5, difficultyBonus:8, completionBonus:10}
+  };
+}
+
+let S = defaultState();
+let view = "kid", tab = "library", modal = null, factOpen = {}, lastPull = 0, saveTimer = null, dirty = false;
+
+/* ---------- points ---------- */
+const basePts = (pages,band) => Math.ceil((Number(pages)||1)/S.config.pagesPerPoint) + (DIFF[band]||1)*S.config.difficultyBonus;
+function openPages(bookId){
+  const fin = S.completions.filter(c=>c.bookId===bookId).map(c=>c.date).sort();
+  const last = fin.length ? fin[fin.length-1].slice(0,10) : null;
+  return S.log.filter(e=>e.bookId===bookId && (!last || e.date > last)).reduce((s,e)=>s+(Number(e.pages)||0),0);
+}
+function progPts(book,pages){
+  const tot = basePts(book.pages,book.grade);
+  return Math.min(tot, Math.floor(tot * Math.min(1,(Number(pages)||0)/Math.max(1,book.pages))));
+}
+function balance(){
+  const done = S.completions.reduce((s,c)=>s+c.awarded,0);
+  const open = S.books.reduce((s,b)=>s+progPts(b,openPages(b.id)),0);
+  const strk = S.streakAwards.filter(a=>a.type==="points").reduce((s,a)=>s+(a.value||0),0);
+  const spent = S.redeemed.reduce((s,r)=>s+r.cost,0);
+  return {bal: done+open+strk-spent, life: done+open+strk};
+}
+
+/* ---------- streaks ---------- */
+function monthDays(){ return new Set(S.log.filter(e=>mKey(e.date)===thisMonth()).map(e=>e.date)); }
+function curStreak(){
+  const d = monthDays(), c = new Date();
+  if(!d.has(today())) c.setDate(c.getDate()-1);
+  let n=0;
+  for(;;){ const k=c.toISOString().slice(0,10); if(mKey(k)!==thisMonth()||!d.has(k)) break; n++; c.setDate(c.getDate()-1); }
+  return n;
+}
+function bestStreak(){
+  const days=[...monthDays()].sort(); let best=0,run=0,prev=null;
+  for(const d of days){
+    run = prev && (new Date(d)-new Date(prev))/86400000===1 ? run+1 : 1;
+    best=Math.max(best,run); prev=d;
+  }
+  return best;
+}
+function checkMilestones(){
+  const best=bestStreak(), m=thisMonth();
+  const have=new Set(S.streakAwards.filter(a=>a.month===m).map(a=>a.days));
+  const now=S.milestones.filter(x=>best>=x.days && !have.has(x.days));
+  if(!now.length) return false;
+  now.forEach(x=>S.streakAwards.push({id:uid(),month:m,days:x.days,type:x.type,value:x.value||0,label:x.label,emoji:x.emoji,date:new Date().toISOString(),fulfilled:x.type==="points"}));
+  return true;
+}
+
+/* ---------- storage ---------- */
+function setSync(t){ document.getElementById("sync").textContent = t; }
+function saveLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){} }
+
+async function pushRemote(){
+  if(!SYNC_ON) return;
+  try{
+    setSync("saving…");
+    const r = await fetch(SUPABASE_URL+"/rest/v1/reading_app",{
+      method:"POST",
+      headers:{ "apikey":SUPABASE_KEY, "Authorization":"Bearer "+SUPABASE_KEY,
+                "Content-Type":"application/json", "Prefer":"resolution=merge-duplicates" },
+      body: JSON.stringify([{ id:SYNC_ROW_ID, data:S, updated_at:new Date().toISOString() }])
+    });
+    if(!r.ok) throw new Error(await r.text());
+    dirty=false; lastPull=Date.now(); setSync("synced ✓");
+  }catch(e){ console.error(e); setSync("offline — saved here"); }
+}
+
+async function pullRemote(force){
+  if(!SYNC_ON) return;
+  if(!force && dirty) return;
+  try{
+    const r = await fetch(SUPABASE_URL+"/rest/v1/reading_app?id=eq."+SYNC_ROW_ID+"&select=data,updated_at",{
+      headers:{ "apikey":SUPABASE_KEY, "Authorization":"Bearer "+SUPABASE_KEY }
+    });
+    if(!r.ok) throw new Error(await r.text());
+    const rows = await r.json();
+    if(rows.length && rows[0].data){
+      const incoming = JSON.stringify(rows[0].data);
+      if(incoming !== JSON.stringify(S)){ S = Object.assign(defaultState(), rows[0].data); render(); }
+      setSync("synced ✓");
+    } else { await pushRemote(); }
+  }catch(e){ console.error(e); setSync("offline — saved here"); }
+}
+
+function save(){
+  saveLocal();
+  if(SYNC_ON){
+    dirty = true; setSync("saving…");
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(pushRemote, 700);
+  }
+}
+
+async function boot(){
+  try{ const raw = localStorage.getItem(LS_KEY); if(raw) S = Object.assign(defaultState(), JSON.parse(raw)); }catch(e){}
+  if(SYNC_ON){ setSync("connecting…"); await pullRemote(true); setInterval(()=>pullRemote(false), 15000); }
+  else setSync("this device only");
+  if(checkMilestones()) save();
+  render();
+}
+
+/* ---------- small helpers ---------- */
+function toast(msg){
+  const t=document.getElementById("toast");
+  t.innerHTML='<div class="toast">'+esc(msg)+'</div>';
+  setTimeout(()=>{t.innerHTML="";},1800);
+}
+function coverHTML(b,w,h){
+  const g=GENRES[b.genre]||GENRES.Other;
+  if(b.coverUrl) return '<div class="cover" style="width:'+w+'px;height:'+h+'px;padding:0"><img src="'+esc(b.coverUrl)+'" alt="" onerror="this.parentNode.innerHTML=\'\'"></div>';
+  const fs = b.title.length>34?10:b.title.length>20?11:13;
+  return '<div class="cover" style="width:'+w+'px;height:'+h+'px;background:linear-gradient(150deg,'+g.c+' 0%,'+g.c+' 55%,var(--ink) 210%)">'
+    +'<div class="spine"></div><div class="mark" style="font-size:'+(w*.7)+'px">'+g.e+'</div>'
+    +'<div><div class="t" style="font-size:'+fs+'px">'+esc(b.title)+'</div><div class="rule"></div></div>'
+    +'<div class="a">'+esc(b.author)+'</div></div>';
+}
+function tagsHTML(b){
+  const g=GENRES[b.genre]||GENRES.Other;
+  return '<div class="tags">'
+    +'<span class="pill" style="background:'+g.c+'">'+esc(b.grade)+'</span>'
+    +'<span class="pill" style="background:var(--ink)">'+b.pages+' pages</span>'
+    +'<span class="pill" style="background:var(--marigold);color:var(--ink)">'+basePts(b.pages,b.grade)+' pts</span>'
+    +'<span class="genre-line" style="color:'+g.c+'">'+g.e+' '+esc(b.genre)+'</span></div>';
+}
+const fmtDate = d => new Date(d+"T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"});
+
+/* ============================================================
+   KID VIEW
+   ============================================================ */
+function kidCard(b){
+  const isR = S.reading.includes(b.id);
+  const pages = openPages(b.id), tot = basePts(b.pages,b.grade), earned = progPts(b,pages);
+  const pct = Math.min(100, Math.round(pages/Math.max(1,b.pages)*100));
+  const times = S.completions.filter(c=>c.bookId===b.id).length;
+  const g = GENRES[b.genre]||GENRES.Other;
+  let h='<div class="card" style="border-color:'+(isR?"var(--marigold)":g.c)+'">';
+  h+='<div class="card-top">'+coverHTML(b,92,134)+'<div style="flex:1;min-width:0">'
+    +'<div class="bk-title">'+esc(b.title)+'</div><div class="bk-author">by '+esc(b.author)+'</div>'
+    +tagsHTML(b)
+    +(times?'<div style="font-size:11px;font-weight:800;color:var(--sage-deep);margin-top:6px">✓ Finished '+times+'×</div>':'')
+    +'</div></div>';
+  if(isR || pages>0){
+    h+='<div><div class="barlab"><span style="color:var(--ink-soft)">'+pages+' of '+b.pages+' pages</span>'
+      +'<span style="color:var(--marigold-deep)">'+earned+' / '+tot+' pts</span></div>'
+      +'<div class="bar"><i style="width:'+pct+'%;background:var(--marigold)"></i></div></div>';
+  }
+  if(b.fact){
+    const open = factOpen[b.id];
+    h+='<div><button class="factbtn" data-act="fact" data-id="'+b.id+'">✨ '+(open?"Hide fun fact":"Peek a fun fact")+'</button>'
+      +(open?'<div class="fact">'+esc(b.fact)+'</div>':'')+'</div>';
+  }
+  h+='<div style="margin-top:auto;display:flex;flex-direction:column;gap:8px">';
+  if(isR){
+    h+='<div class="row2"><button class="btn plum" data-act="logmodal" data-id="'+b.id+'">📝 Log reading</button>'
+      +'<button class="btn sage" data-act="finmodal" data-id="'+b.id+'">✓ Finished!</button></div>'
+      +'<button class="linky" data-act="stop" data-id="'+b.id+'">Put back on the shelf</button>';
+  } else {
+    h+='<button class="btn coral" data-act="start" data-id="'+b.id+'">🔖 I\'m reading this</button>';
+  }
+  return h+'</div></div>';
+}
+
+function streakHTML(){
+  const streak=curStreak(), best=bestStreak(), days=monthDays();
+  const now=new Date(), total=new Date(now.getFullYear(),now.getMonth()+1,0).getDate(), td=now.getDate();
+  const monthName=now.toLocaleDateString(undefined,{month:"long"});
+  const max=Math.max.apply(null,S.milestones.map(m=>m.days));
+  const readToday=days.has(today());
+  let h='<div class="streak"><div class="streak-head">'
+   +'<div style="display:flex;align-items:center;gap:14px">'
+   +'<div class="flame'+(streak>0?" on":"")+'"'+(streak>0?"":' style="opacity:.4"')+'>🔥</div><div>'
+   +'<div class="streak-n">'+streak+' <span>day'+(streak===1?"":"s")+' in a row</span></div>'
+   +'<div style="font-size:12px;font-weight:800;margin-top:4px;color:'+(readToday?"var(--sage-deep)":"var(--coral-deep)")+'">'
+   +(readToday?"You read today — streak is safe!":streak>0?"Read today to keep your streak alive":"Read today to start a new streak")+'</div>'
+   +'</div></div><div style="text-align:right">'
+   +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft)">'+monthName+'</div>'
+   +'<div style="font-family:var(--score);font-size:14px;font-weight:700;color:var(--marigold-deep)">'+days.size+' days read</div>'
+   +'</div></div><div class="dots">';
+  for(let d=1;d<=total;d++){
+    const iso=thisMonth()+"-"+String(d).padStart(2,"0");
+    const cls=days.has(iso)?"dot read":d>td?"dot future":"dot";
+    h+='<div class="'+cls+(d===td?" today":"")+'" title="'+monthName+' '+d+'">'+(days.has(iso)?"✓":d)+'</div>';
+  }
+  h+='</div><div class="track"><div class="bar"><i style="width:'+Math.min(100,streak/max*100)+'%;background:linear-gradient(90deg,var(--coral),var(--marigold),var(--sage))"></i></div><div class="nodes">';
+  S.milestones.forEach(m=>{
+    const done=best>=m.days, left=Math.max(0,m.days-streak);
+    h+='<div class="node'+(done?" done":"")+'" style="left:'+(m.days/max*100)+'%">'
+      +'<div class="k">'+(done?"✓":m.days)+'</div><div class="e">'+m.emoji+'</div>'
+      +'<div class="lab" style="color:'+(done?"var(--sage-deep)":"var(--ink)")+'">'+esc(m.label)+'</div>'
+      +'<div class="sub">'+(done?"Earned!":left+" day"+(left===1?"":"s")+" to go")+'</div></div>';
+  });
+  return h+'</div></div><div class="track-space"></div>'
+    +'<p style="font-size:11px;text-align:center;color:var(--ink-soft)">Streak prizes reset on the 1st of each month — a fresh chance every month.</p></div>';
+}
+
+function kidView(){
+  const {bal}=balance();
+  const cutoff=new Date(); cutoff.setDate(cutoff.getDate()-6);
+  const ck=cutoff.toISOString().slice(0,10);
+  const wk=S.log.filter(e=>e.date>=ck);
+  const wp=wk.reduce((s,e)=>s+e.pages,0), wm=wk.reduce((s,e)=>s+e.minutes,0);
+  const reading=S.books.filter(b=>S.reading.includes(b.id));
+  const shelf=S.books.filter(b=>!S.reading.includes(b.id));
+  const pending=S.streakAwards.filter(a=>a.type==="prize"&&!a.fulfilled);
+
+  let h='<div class="topbar"><div class="wrap"><div class="topbar-row"><div>'
+   +'<div class="eyebrow">Reading Passport</div><h1>'+esc(KID_NAME)+"'s Bookshelf</h1></div>"
+   +'<div class="bank">🪙<div><span class="n">'+bal+'</span><span class="l">points</span></div></div></div>'
+   +'<div class="chips"><span class="chip">🔥 '+curStreak()+'-day streak</span>'
+   +'<span class="chip">📖 '+wp+' pages this week</span><span class="chip">⏱ '+wm+' min this week</span></div>'
+   +'</div></div><div class="wrap" style="padding-top:30px;padding-bottom:60px">';
+
+  if(pending.length){
+    h+='<div class="banner"><div style="font-size:22px">🎉</div><div><h3>You earned a streak prize!</h3>';
+    pending.forEach(a=>{h+='<p>'+a.emoji+' <strong>'+esc(a.label)+'</strong> — for reading '+a.days+' days in a row. Show a grown-up!</p>';});
+    h+='</div></div>';
+  }
+  h+=streakHTML();
+
+  if(reading.length){
+    h+='<section><h2 class="sec">🔖 Reading right now</h2><div class="grid">'+reading.map(kidCard).join("")+'</div></section>';
+  }
+  h+='<section><h2 class="sec">📚 Books on my shelf <span class="count">'+shelf.length+'</span></h2>'
+   +(shelf.length?'<div class="grid">'+shelf.map(kidCard).join("")+'</div>':'<p class="muted">Every book is off the shelf right now. Ask a grown-up to add more!</p>')+'</section>';
+
+  h+='<section><h2 class="sec">✅ Books I\'ve finished <span class="count">'+S.completions.length+'</span></h2>';
+  if(!S.completions.length) h+='<p class="muted">Nothing here yet — finish a book and it lands on this shelf.</p>';
+  else{
+    h+='<div class="shelf"><div class="shelf-row">';
+    S.completions.slice().reverse().forEach(c=>{
+      const b=S.books.find(x=>x.id===c.bookId); if(!b) return;
+      h+='<div class="fin"><div class="rel">'+coverHTML(b,92,134)+'<div class="badge">✓</div></div>'
+       +'<div class="n">'+esc(b.title)+'</div>'
+       +'<div style="font-size:11px">'+"★".repeat(c.rating)+'<span style="opacity:.25">'+"★".repeat(5-c.rating)+'</span></div>'
+       +'<div style="font-family:var(--score);font-size:10px;color:var(--ink-soft)">+'+c.awarded+' pts</div></div>';
+    });
+    h+='</div></div>';
+  }
+  h+='</section>';
+
+  const recent=S.log.slice().sort((a,b)=>a.date<b.date?1:-1).slice(0,8);
+  h+='<section><h2 class="sec">📝 My reading log</h2>';
+  if(!recent.length) h+='<p class="muted">No entries yet. Start a book, then tap "Log reading" after you read.</p>';
+  else recent.forEach(e=>{
+    const b=S.books.find(x=>x.id===e.bookId);
+    h+='<div class="logrow"><span class="d">'+fmtDate(e.date)+'</span><span class="t">'+esc(b?b.title:"A book")+'</span>'
+     +'<span class="v">'+e.pages+'p · '+e.minutes+'m</span></div>';
+  });
+  h+='</section>';
+
+  h+='<section><h2 class="sec">🎁 Prize shelf</h2><div class="prizes">';
+  S.rewards.forEach(r=>{
+    const can=bal>=r.cost, pct=Math.min(100,Math.round(bal/r.cost*100)), left=Math.max(0,r.cost-bal);
+    const col=can?"var(--sage)":pct>=60?"var(--marigold)":"var(--coral)";
+    h+='<div class="prize'+(can?" ready":"")+'"><div class="prize-head"><span class="e">'+r.emoji+'</span>'
+     +'<div style="flex:1;min-width:0"><div class="prize-name">'+esc(r.name)+'</div><div class="prize-cost">'+r.cost+' pts</div></div></div>'
+     +'<div><div class="bar"><i style="width:'+pct+'%;background:'+col+'"></i></div>'
+     +'<div class="prize-note">'+(can?"Ready to redeem!":left+" more points to go")+'</div></div>'
+     +'<button class="btn '+(can?"sage":"")+'" style="font-size:14px;padding:8px" data-act="redeem" data-id="'+r.id+'"'+(can?"":" disabled")+'>'
+     +(can?"Redeem":"Keep reading")+'</button></div>';
+  });
+  h+='</div></section>';
+
+  h+='<button class="linky" style="margin-top:40px;opacity:.6" data-act="toparent">Parent Dashboard →</button>';
+  return h+'</div>';
+}
+
+/* ============================================================
+   PARENT VIEW
+   ============================================================ */
+function parentView(){
+  const {bal,life}=balance();
+  let h='<div class="phead"><div class="wrap">'
+   +'<div style="display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:12px">'
+   +'<button class="linky" data-act="tokid">← Back to '+esc(KID_NAME)+"'s view</button>"
+   +'<span style="font-family:var(--score);font-weight:700;font-size:13px;background:rgba(242,169,59,.25);color:var(--marigold-deep);padding:6px 12px;border-radius:12px">🪙 '+bal+' pts</span></div>'
+   +'<h1 style="font-family:var(--display);font-size:24px;font-weight:800">Parent Dashboard</h1><div class="tabs">';
+  [["library","Library"],["add","Add a Book"],["log","Reading Log"],["streak","Streaks"],["prizes","Prizes & Points"],["stats","Stats"]]
+    .forEach(([k,l])=>{ h+='<button class="tab'+(tab===k?" on":"")+'" data-act="tab" data-id="'+k+'">'+l+'</button>'; });
+  h+='</div></div></div><div class="wrap" style="padding-top:28px;padding-bottom:60px">';
+
+  if(tab==="library"){
+    h+='<div class="libgrid">';
+    S.books.forEach(b=>{
+      const g=GENRES[b.genre]||GENRES.Other, p=openPages(b.id);
+      h+='<div class="libitem">'+coverHTML(b,56,82)+'<div style="flex:1;min-width:0">'
+       +'<div style="font-weight:800;font-size:14px;line-height:1.2">'+esc(b.title)+'</div>'
+       +'<div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px">'+esc(b.author)+'</div>'
+       +'<div class="tags" style="margin:0"><span class="pill" style="background:'+g.c+'">'+esc(b.grade)+'</span>'
+       +'<span class="pill" style="background:var(--ink)">'+b.pages+'p</span>'
+       +'<span class="pill" style="background:var(--marigold);color:var(--ink)">'+basePts(b.pages,b.grade)+' pts</span></div>'
+       +(p>0?'<div style="font-family:var(--score);font-size:10px;color:var(--plum-deep);margin-top:6px">'+p+' pages read · '+progPts(b,p)+' pts earned</div>':'')
+       +'</div><button class="trash" data-act="delbook" data-id="'+b.id+'">🗑</button></div>';
+    });
+    h+='</div>';
+  }
+
+  if(tab==="add"){
+    h+='<div class="panel" style="max-width:620px"><label class="f">Start typing a title</label>'
+     +'<input class="in" id="lookup" placeholder="e.g. Charlotte\'s Web" autocomplete="off">'
+     +'<div id="matches"></div>'
+     +'<p style="font-size:12px;color:var(--ink-soft);margin:6px 0 16px">Picking a match fills everything in. Not listed? Type it yourself.</p>'
+     +'<div class="formgrid">'
+     +'<div><label class="f">Author</label><input class="in" id="f_author"></div>'
+     +'<div><label class="f">Pages</label><input class="in" id="f_pages" type="number" min="1"></div>'
+     +'<div><label class="f">Reading level</label><select class="in" id="f_grade">'+BANDS.map(b=>'<option>'+b+'</option>').join("")+'</select></div>'
+     +'<div><label class="f">Genre</label><select class="in" id="f_genre">'+Object.keys(GENRES).map(g=>'<option>'+g+'</option>').join("")+'</select></div>'
+     +'</div>'
+     +'<div style="margin-top:12px"><label class="f">Cover image URL (optional)</label><input class="in" id="f_cover" placeholder="https://…"></div>'
+     +'<div style="margin-top:12px"><label class="f">Fun fact (optional)</label><textarea class="in" id="f_fact" rows="2"></textarea></div>'
+     +'<button class="btn ink" style="margin-top:16px" data-act="addbook">+ Add to library</button></div>';
+  }
+
+  if(tab==="log"){
+    h+='<div class="panel"><h3 style="font-family:var(--display);font-weight:700;margin-bottom:12px">Add an entry</h3>'
+     +'<div class="formgrid"><div style="grid-column:1/-1"><label class="f">Book</label><select class="in" id="l_book"><option value="">Choose a book…</option>'
+     +S.books.map(b=>'<option value="'+b.id+'">'+esc(b.title)+'</option>').join("")+'</select></div>'
+     +'<div><label class="f">Date</label><input class="in" id="l_date" type="date" value="'+today()+'"></div>'
+     +'<div><label class="f">Pages</label><input class="in" id="l_pages" type="number" min="0"></div>'
+     +'<div><label class="f">Minutes</label><input class="in" id="l_min" type="number" min="0"></div>'
+     +'<div style="display:flex;align-items:flex-end"><button class="btn ink" data-act="addlog">Add entry</button></div>'
+     +'</div></div>'
+     +'<p style="font-size:12px;color:var(--ink-soft);margin-bottom:18px">Points are calculated from this log, so any correction here updates her balance and streak automatically.</p>';
+    const sorted=S.log.slice().sort((a,b)=>a.date<b.date?1:-1);
+    if(!sorted.length) h+='<p class="muted">No reading sessions logged yet.</p>';
+    sorted.forEach(e=>{
+      const b=S.books.find(x=>x.id===e.bookId);
+      h+='<div class="editrow"><input class="mini" type="date" value="'+e.date+'" data-edit="date" data-id="'+e.id+'" style="width:132px">'
+       +'<span style="flex:1;min-width:130px;font-weight:800;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b?b.title:"(book removed)")+'</span>'
+       +'<label style="font-size:12px;color:var(--ink-soft)">pages <input class="mini" type="number" min="0" value="'+e.pages+'" data-edit="pages" data-id="'+e.id+'"></label>'
+       +'<label style="font-size:12px;color:var(--ink-soft)">min <input class="mini" type="number" min="0" value="'+e.minutes+'" data-edit="minutes" data-id="'+e.id+'"></label>'
+       +'<button class="trash" data-act="dellog" data-id="'+e.id+'">🗑</button></div>';
+    });
+  }
+
+  if(tab==="streak"){
+    const pend=S.streakAwards.filter(a=>a.type==="prize"&&!a.fulfilled);
+    const mine=S.streakAwards.filter(a=>a.month===thisMonth());
+    h+='<div class="stats">'
+     +'<div class="stat">🔥<div class="n">'+curStreak()+'d</div><div class="l">Current streak</div></div>'
+     +'<div class="stat">🏆<div class="n">'+bestStreak()+'d</div><div class="l">Best this month</div></div>'
+     +'<div class="stat">📖<div class="n">'+monthDays().size+'</div><div class="l">Days read this month</div></div>'
+     +'<div class="stat">🎁<div class="n">'+mine.length+'</div><div class="l">Milestones hit this month</div></div></div>';
+    if(pend.length){
+      h+='<h3 style="font-family:var(--display);font-size:18px;font-weight:700;margin-bottom:12px">Prizes to hand out</h3>';
+      pend.forEach(a=>{
+        h+='<div class="editrow" style="background:rgba(95,169,138,.12);border-color:var(--sage)"><span style="font-size:20px">'+a.emoji+'</span>'
+         +'<div style="flex:1"><div style="font-weight:800;font-size:14px">'+esc(a.label)+'</div>'
+         +'<div style="font-size:12px;color:var(--ink-soft)">Earned for a '+a.days+'-day streak · '+new Date(a.date).toLocaleDateString()+'</div></div>'
+         +'<button class="btn sage" style="font-size:13px;padding:7px 14px" data-act="fulfill" data-id="'+a.id+'">Mark as given</button></div>';
+      });
+      h+='<div style="height:28px"></div>';
+    }
+    h+='<h3 style="font-family:var(--display);font-size:18px;font-weight:700">Streak milestones</h3>'
+     +'<p class="muted" style="margin:6px 0 14px">Milestones reset on the 1st. Point rewards land in her balance automatically; real-world prizes appear above for you to hand out.</p>';
+    S.milestones.forEach((m,i)=>{
+      h+='<div class="editrow"><input class="mini" style="width:46px;text-align:center;font-family:var(--body)" value="'+esc(m.emoji)+'" data-ms="emoji" data-id="'+i+'">'
+       +'<span style="font-family:var(--score);font-weight:700;font-size:13px;color:var(--marigold-deep);width:62px">'+m.days+' days</span>'
+       +'<input class="in" style="flex:1;min-width:150px;padding:6px 10px" value="'+esc(m.label)+'" data-ms="label" data-id="'+i+'">'
+       +(m.type==="points"?'<label style="font-size:12px;color:var(--ink-soft)">points <input class="mini" type="number" min="0" value="'+m.value+'" data-ms="value" data-id="'+i+'"></label>':'')
+       +'<span style="font-size:11px;padding:4px 9px;border-radius:99px;background:'+(m.type==="points"?"rgba(242,169,59,.25);color:var(--marigold-deep)":"rgba(124,92,191,.15);color:var(--plum-deep)")+'">'
+       +(m.type==="points"?"auto points":"you hand out")+'</span></div>';
+    });
+  }
+
+  if(tab==="prizes"){
+    h+='<div class="panel"><h3 style="font-family:var(--display);font-size:18px;font-weight:700;margin-bottom:12px">Prizes</h3>';
+    S.rewards.forEach(r=>{
+      h+='<div class="editrow"><span style="font-size:20px">'+r.emoji+'</span>'
+       +'<div style="flex:1"><div style="font-weight:800;font-size:14px">'+esc(r.name)+'</div>'
+       +'<div style="font-family:var(--score);font-size:12px;color:var(--marigold-deep)">'+r.cost+' pts</div></div>'
+       +'<button class="trash" data-act="delprize" data-id="'+r.id+'">🗑</button></div>';
+    });
+    h+='<div class="editrow" style="border-style:dashed"><input class="mini" id="p_emoji" value="🎁" style="width:46px;text-align:center;font-family:var(--body)">'
+     +'<input class="in" id="p_name" placeholder="Prize name" style="flex:1;min-width:140px;padding:6px 10px">'
+     +'<input class="mini" id="p_cost" type="number" min="1" placeholder="pts">'
+     +'<button class="btn ink" style="font-size:13px;padding:7px 14px" data-act="addprize">Add</button></div></div>';
+
+    h+='<div class="panel" style="max-width:520px"><h3 style="font-family:var(--display);font-size:18px;font-weight:700">Point formula</h3>'
+     +'<p class="muted" style="margin:6px 0 14px">A book\'s base value = (pages ÷ pages-per-point) + (reading level 1–5 × level bonus). She earns it gradually as she logs pages, plus the finishing bonus when she completes it.</p>'
+     +'<div style="display:flex;flex-direction:column;gap:12px">'
+     +'<div><label class="f">Pages per point (lower = more points)</label><input class="in" type="number" min="1" value="'+S.config.pagesPerPoint+'" data-cfg="pagesPerPoint"></div>'
+     +'<div><label class="f">Bonus per reading level</label><input class="in" type="number" min="0" value="'+S.config.difficultyBonus+'" data-cfg="difficultyBonus"></div>'
+     +'<div><label class="f">Finishing bonus</label><input class="in" type="number" min="0" value="'+S.config.completionBonus+'" data-cfg="completionBonus"></div></div>'
+     +'<div style="margin-top:16px;border:1px solid var(--parchment-deep);border-radius:12px;overflow:hidden">'
+     +'<div style="background:var(--parchment-deep);padding:8px 12px;font-size:12px;font-weight:800">What books are worth right now</div>';
+    [[60,"K-1"],[120,"2nd-3rd"],[200,"3rd-4th"],[320,"4th-5th"]].forEach(([p,g])=>{
+      h+='<div style="display:flex;justify-content:space-between;padding:7px 12px;font-size:14px;color:var(--ink-soft)"><span>'+p+' pages · '+g+'</span>'
+       +'<span style="font-family:var(--score);font-weight:700;color:var(--marigold-deep)">'+basePts(p,g)+' + '+S.config.completionBonus+'</span></div>';
+    });
+    h+='</div></div>';
+  }
+
+  if(tab==="stats"){
+    const tp=S.log.reduce((s,e)=>s+e.pages,0), tm=S.log.reduce((s,e)=>s+e.minutes,0);
+    const gc={}; S.completions.forEach(c=>{const b=S.books.find(x=>x.id===c.bookId); if(b) gc[b.genre]=(gc[b.genre]||0)+1;});
+    const fav=Object.entries(gc).sort((a,b)=>b[1]-a[1])[0];
+    h+='<div class="stats">'
+     +'<div class="stat">✅<div class="n">'+S.completions.length+'</div><div class="l">Books finished</div></div>'
+     +'<div class="stat">🪙<div class="n">'+life+'</div><div class="l">Lifetime points</div></div>'
+     +'<div class="stat">✨<div class="n">'+bal+'</div><div class="l">Points available</div></div>'
+     +'<div class="stat">🔥<div class="n">'+curStreak()+'d</div><div class="l">Current streak</div></div>'
+     +'<div class="stat">📖<div class="n">'+tp+'</div><div class="l">Pages logged</div></div>'
+     +'<div class="stat">⏱<div class="n">'+tm+'</div><div class="l">Minutes logged</div></div>'
+     +'<div class="stat">⭐<div class="n txt">'+esc(fav?fav[0]:"—")+'</div><div class="l">Favorite genre</div></div></div>'
+     +'<h3 style="font-family:var(--display);font-size:18px;font-weight:700;margin-bottom:12px">Redemption history</h3>';
+    if(!S.redeemed.length) h+='<p class="muted">'+esc(KID_NAME)+' hasn\'t redeemed anything yet.</p>';
+    S.redeemed.slice().reverse().forEach(r=>{
+      h+='<div class="logrow"><span class="t">'+r.emoji+' '+esc(r.name)+'</span>'
+       +'<span class="v">−'+r.cost+' pts · '+new Date(r.date).toLocaleDateString()+'</span></div>';
+    });
+  }
+  return h+'</div>';
+}
+
+/* ============================================================
+   MODALS
+   ============================================================ */
+let mRating=5;
+function modalHTML(){
+  if(!modal) return "";
+  const b=S.books.find(x=>x.id===modal.bookId); if(!b) return "";
+  if(modal.type==="log"){
+    return '<div class="modal-bg" data-act="closebg"><div class="modal">'
+     +'<h3>Reading log</h3><p style="font-weight:800;color:var(--plum-deep);margin-bottom:18px">'+esc(b.title)+'</p>'
+     +'<label class="f">What day was this?</label><input class="in" id="m_date" type="date" value="'+today()+'" max="'+today()+'">'
+     +'<div style="height:12px"></div><label class="f">How many pages did you read?</label><input class="in" id="m_pages" type="number" min="0" placeholder="0" inputmode="numeric">'
+     +'<div style="height:12px"></div><label class="f">For how many minutes?</label><input class="in" id="m_min" type="number" min="0" placeholder="0" inputmode="numeric">'
+     +'<div style="height:20px"></div><div class="row2"><button class="btn ghost" data-act="closem">Cancel</button>'
+     +'<button class="btn plum" data-act="savelog">Save entry</button></div></div></div>';
+  }
+  const tot=basePts(b.pages,b.grade), have=progPts(b,openPages(b.id)), left=Math.max(0,tot-have), bonus=S.config.completionBonus;
+  let stars="";
+  for(let i=1;i<=5;i++) stars+='<span class="star'+(i<=mRating?" on":"")+'" data-act="rate" data-id="'+i+'">★</span>';
+  return '<div class="modal-bg" data-act="closebg"><div class="modal">'
+   +'<h3>You finished it!</h3><p style="font-weight:800;color:var(--coral-deep)">'+esc(b.title)+'</p>'
+   +'<p class="muted" style="margin-top:14px">How many stars do you give it?</p><div class="stars">'+stars+'</div>'
+   +'<div class="calc">'
+   +(have>0?'<div class="l"><span>Already earned while reading</span><span style="font-family:var(--score)">'+have+' pts</span></div>':'')
+   +'<div class="l"><span>Rest of the book</span><span style="font-family:var(--score)">+'+left+' pts</span></div>'
+   +'<div class="l"><span>Finishing bonus</span><span style="font-family:var(--score)">+'+bonus+' pts</span></div>'
+   +'<div class="tot"><span>Adding now</span><span style="font-family:var(--score);color:var(--marigold-deep)">+'+(left+bonus)+'</span></div></div>'
+   +'<div class="row2"><button class="btn ghost" data-act="closem">Not yet</button>'
+   +'<button class="btn sage" data-act="savefin">Add to my shelf</button></div></div></div>';
+}
+
+/* ============================================================
+   RENDER + EVENTS
+   ============================================================ */
+function render(){
+  document.getElementById("app").innerHTML = view==="kid" ? kidView() : parentView();
+  document.getElementById("modal").innerHTML = modalHTML();
+  window.scrollTo(0, scrollMem);
+}
+let scrollMem=0;
+function rerender(){ scrollMem=window.scrollY; render(); }
+
+const $ = id => document.getElementById(id);
+const val = id => { const e=$(id); return e ? e.value : ""; };
+const num = id => Number(val(id))||0;
+
+document.addEventListener("click", ev => {
+  const t = ev.target.closest("[data-act]"); if(!t) return;
+  const act=t.dataset.act, id=t.dataset.id;
+
+  if(act==="closebg" && ev.target!==t) return;
+
+  switch(act){
+    case "toparent": view="parent"; scrollMem=0; render(); window.scrollTo(0,0); break;
+    case "tokid": view="kid"; scrollMem=0; render(); window.scrollTo(0,0); break;
+    case "tab": tab=id; scrollMem=0; render(); window.scrollTo(0,0); break;
+    case "fact": factOpen[id]=!factOpen[id]; rerender(); break;
+    case "start": if(!S.reading.includes(id)) S.reading.push(id); save(); rerender(); toast("Happy reading!"); break;
+    case "stop": S.reading=S.reading.filter(x=>x!==id); save(); rerender(); break;
+    case "logmodal": modal={type:"log",bookId:id}; render(); break;
+    case "finmodal": modal={type:"fin",bookId:id}; mRating=5; render(); break;
+    case "closem": case "closebg": modal=null; render(); break;
+    case "rate": mRating=Number(id); render(); break;
+
+    case "savelog": {
+      const b=S.books.find(x=>x.id===modal.bookId);
+      const before=progPts(b,openPages(b.id));
+      S.log.push({id:uid(),bookId:b.id,date:val("m_date")||today(),pages:num("m_pages"),minutes:num("m_min")});
+      const after=progPts(b,openPages(b.id));
+      const got=checkMilestones();
+      modal=null; save(); rerender();
+      const g=after-before;
+      toast(g>0 ? "+"+g+" points!" : got ? "Milestone reached!" : "Entry saved");
+      break;
+    }
+    case "savefin": {
+      const b=S.books.find(x=>x.id===modal.bookId);
+      S.completions.push({id:uid(),bookId:b.id,rating:mRating,awarded:basePts(b.pages,b.grade)+S.config.completionBonus,date:new Date().toISOString()});
+      S.reading=S.reading.filter(x=>x!==b.id);
+      modal=null; save(); rerender(); toast("Book finished! 🎉");
+      break;
+    }
+    case "redeem": {
+      const r=S.rewards.find(x=>x.id===id); if(!r) break;
+      if(balance().bal < r.cost) break;
+      S.redeemed.push({id:uid(),name:r.name,emoji:r.emoji,cost:r.cost,date:new Date().toISOString()});
+      save(); rerender(); toast("Redeemed "+r.emoji);
+      break;
+    }
+    case "addbook": {
+      const title=val("lookup").trim(), pages=num("f_pages");
+      if(!title||!pages){ toast("Add a title and page count"); break; }
+      S.books.push({id:uid(),title:title,author:val("f_author"),grade:val("f_grade"),pages:pages,
+                    genre:val("f_genre"),fact:val("f_fact"),coverUrl:val("f_cover").trim()});
+      save(); tab="library"; scrollMem=0; render(); toast("Added to library");
+      break;
+    }
+    case "delbook": S.books=S.books.filter(b=>b.id!==id); S.reading=S.reading.filter(x=>x!==id); save(); rerender(); break;
+    case "addlog": {
+      const bid=val("l_book"); if(!bid){ toast("Pick a book first"); break; }
+      S.log.push({id:uid(),bookId:bid,date:val("l_date")||today(),pages:num("l_pages"),minutes:num("l_min")});
+      checkMilestones(); save(); rerender(); toast("Entry added");
+      break;
+    }
+    case "dellog": S.log=S.log.filter(e=>e.id!==id); save(); rerender(); break;
+    case "fulfill": {
+      const a=S.streakAwards.find(x=>x.id===id); if(a) a.fulfilled=true;
+      save(); rerender(); break;
+    }
+    case "addprize": {
+      const n=val("p_name").trim(), c=num("p_cost");
+      if(!n||!c){ toast("Add a name and cost"); break; }
+      S.rewards.push({id:uid(),name:n,cost:c,emoji:val("p_emoji")||"🎁"});
+      save(); rerender(); break;
+    }
+    case "delprize": S.rewards=S.rewards.filter(r=>r.id!==id); save(); rerender(); break;
+  }
+});
+
+/* live edits in the parent dashboard */
+document.addEventListener("change", ev => {
+  const el=ev.target;
+  if(el.dataset.edit){
+    const e=S.log.find(x=>x.id===el.dataset.id); if(!e) return;
+    e[el.dataset.edit] = el.dataset.edit==="date" ? el.value : Number(el.value)||0;
+    checkMilestones(); save(); rerender();
+  }
+  if(el.dataset.ms){
+    const m=S.milestones[Number(el.dataset.id)]; if(!m) return;
+    m[el.dataset.ms] = el.dataset.ms==="value" ? Number(el.value)||0 : el.value;
+    save(); rerender();
+  }
+  if(el.dataset.cfg){
+    S.config[el.dataset.cfg]=Math.max(el.dataset.cfg==="pagesPerPoint"?1:0, Number(el.value)||0);
+    save(); rerender();
+  }
+});
+
+/* catalog autocomplete */
+document.addEventListener("input", ev => {
+  if(ev.target.id!=="lookup") return;
+  const q=ev.target.value.toLowerCase().trim();
+  const box=$("matches"); if(!box) return;
+  if(!q){ box.innerHTML=""; return; }
+  const hits=CATALOG.filter(b=>b.title.toLowerCase().includes(q)).slice(0,6);
+  box.innerHTML = hits.length ? '<div style="border:1px solid var(--parchment-deep);border-radius:12px;overflow:hidden;margin-top:4px">'
+    + hits.map((b,i)=>'<div data-pick="'+CATALOG.indexOf(b)+'" style="padding:8px 12px;font-size:14px;cursor:pointer;background:var(--paper)">'
+      +'<strong>'+esc(b.title)+'</strong> <span style="color:var(--ink-soft)">— '+esc(b.author)+'</span></div>').join("")
+    + '</div>' : "";
+});
+document.addEventListener("click", ev => {
+  const p=ev.target.closest("[data-pick]"); if(!p) return;
+  const b=CATALOG[Number(p.dataset.pick)];
+  $("lookup").value=b.title; $("f_author").value=b.author; $("f_pages").value=b.pages;
+  $("f_grade").value=b.grade; $("f_genre").value=b.genre; $("f_fact").value=b.fact;
+  $("matches").innerHTML="";
+});
+
+boot();
+</script>
+</body>
+</html>
