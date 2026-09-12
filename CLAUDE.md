@@ -65,22 +65,36 @@ Two modes, controlled by the CONFIG block at the top of the script:
 The anon key is public in the repo. Fine for this — no sensitive data — but don't
 reuse that Supabase project for anything else.
 
-## Book covers
+## Book covers and lookup
 
-No live book API yet. Covers are generated procedurally from genre color + title
-typography + a watermark emoji. An optional `coverUrl` per book overrides this and
-falls back to the generated cover if the image fails to load.
+Covers are generated procedurally from genre color + title typography + a watermark
+emoji. An optional `coverUrl` per book overrides this and falls back to the generated
+cover if the image fails to load.
 
 `CATALOG` is a hardcoded array of ~25 common kids' books with real page counts,
-grade bands, and fun facts, used for autocomplete when adding a book.
+grade bands, and fun facts, used for autocomplete when adding a book. A catalog hit
+also wins over an API result for reading level, genre and fun fact.
+
+**Open Library lookup** (no key, CORS-friendly) lives in the "OPEN LIBRARY LOOKUP"
+block of the script. `olLookup({isbn})` uses the Books API (`jscmd=data`) and falls
+back to the search index for a median page count / cover; the search index matches
+ISBNs loosely, so a fallback hit is only trusted if its `isbn` list contains the one
+asked for. `olLookup({title, author?})` uses `search.json`. Reading level and genre
+aren't in the API: `guessGrade()` is a page-count heuristic and `guessGenre()` keys
+off subject strings. Both are shown as editable defaults, never silently final.
+
+Add a Book tab has an ISBN field (single book, fills the form) and a **Bulk import**
+panel: one title or ISBN per line ("Title by Author" works), looked up three at a
+time, reviewed in an editable list, then added in one go. Rows with no page count
+are skipped on add (points need pages), duplicates of library titles are unchecked.
+Bulk state is transient (`bulk` variable), never saved. Books added via lookup carry
+an extra `isbn` field; nothing reads it yet.
 
 ## Things I'd like to do next
 
-1. **Real ISBN lookup.** Biggest win. Type or scan an ISBN, get title, author, page
-   count, and cover art automatically. Open Library's API is free and needs no key.
-   Would replace most manual entry.
-2. **Barcode scanning** from a phone camera so Hannah can scan books off the shelf.
-3. Reading level data is currently manual (K-1 through 5th+). Lexile or AR level
+1. **Barcode scanning** from a phone camera so Hannah can scan books off the shelf.
+   The ISBN field is already there; this just needs to feed it.
+2. Reading level data is currently manual (K-1 through 5th+). Lexile or AR level
    lookup would be better if there's a free source.
 
 ## Conventions

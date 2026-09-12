@@ -397,6 +397,212 @@ function tagsHTML(b){
 const fmtDate = d => new Date(d+"T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"});
 
 /* ============================================================
+   OPEN LIBRARY LOOKUP (free, no key)
+   Fills in title / author / pages / cover. Reading level and
+   genre aren't in the API, so they're guessed and left editable.
+   ============================================================ */
+const OL = "https://openlibrary.org";
+const isbnClean = s => String(s||"").replace(/[^0-9Xx]/g,"").toUpperCase();
+const looksLikeISBN = s => { const c=isbnClean(s); return c.length===10 || c.length===13; };
+const normTitle = s => String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+const olCover = id => id ? "https://covers.openlibrary.org/b/id/"+id+"-M.jpg" : "";
+
+function guessGrade(pages){
+  const p=Number(pages)||0;
+  if(!p) return "2nd-3rd";
+  return p<=40?"K-1" : p<=64?"1st-2nd" : p<=130?"2nd-3rd" : p<=260?"3rd-4th" : "4th-5th";
+}
+function guessGenre(subjects){
+  const s=(subjects||[]).map(x=>String(x&&x.name?x.name:x).toLowerCase()).join(" | ");
+  const rules=[["Mystery",/mystery|detective/],["Fantasy Adventure",/quest|demigod|mytholog/],["Fantasy",/fantasy|magic|wizard|dragon|fairy|witch/],
+    ["Animal Friends",/animal|dogs?\b|cats?\b|pigs?\b|frogs?|mice|mouse|bears?\b|pets?\b|rabbit|elephant|gorilla/],["School Life",/school|teacher|classroom/],
+    ["Silly",/humor|humour|funny|comic|nonsense/],["Adventure",/adventure|survival|robot|explor/],["Friendship",/friendship|friends/],["Everyday Adventures",/family|siblings|neighbo/]];
+  for(const [g,re] of rules) if(re.test(s)) return g;
+  return "Other";
+}
+function catalogMatch(title){
+  const t=normTitle(title); if(!t) return null;
+  return CATALOG.find(b=>{ const c=normTitle(b.title); return c===t || (Math.min(c.length,t.length)>=10 && (c.includes(t)||t.includes(c))); }) || null;
+}
+async function olFetch(url){
+  const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),10000);
+  try{
+    const r=await fetch(url,{signal:ctrl.signal});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+/* q = {isbn} or {title, author?}. Resolves to {title,author,pages,coverUrl,subjects,isbn} or null. Throws if the network fails. */
+async function olLookup(q){
+  if(q.isbn){
+    const isbn=isbnClean(q.isbn);
+    const d=await olFetch(OL+"/api/books?bibkeys=ISBN:"+isbn+"&format=json&jscmd=data");
+    const b=d["ISBN:"+isbn];
+    let out=null;
+    if(b) out={title:b.title||"", author:(b.authors||[]).map(a=>a.name).filter(Boolean).join(", "), pages:Number(b.number_of_pages)||0,
+               coverUrl:(b.cover&&(b.cover.medium||b.cover.large))||"", subjects:(b.subjects||[]).map(s=>s.name||s), isbn};
+    if(!out || !out.pages || !out.coverUrl){
+      /* fill gaps from the search index: median page count across editions */
+      try{
+        const s=await olFetch(OL+"/search.json?isbn="+isbn+"&limit=1&fields=title,author_name,number_of_pages_median,cover_i,subject,isbn");
+        const doc=(s.docs||[])[0];
+        /* the search index matches loosely, so only trust a hit that really carries this ISBN */
+        if(doc && (doc.isbn||[]).includes(isbn)){
+          out=out||{title:doc.title||"", author:(doc.author_name||[]).join(", "), pages:0, coverUrl:"", subjects:[], isbn};
+          if(!out.pages) out.pages=Number(doc.number_of_pages_median)||0;
+          if(!out.coverUrl) out.coverUrl=olCover(doc.cover_i);
+          if(!out.subjects.length) out.subjects=doc.subject||[];
+        }
+      }catch(e){}
+    }
+    return out && out.title ? out : null;
+  }
+  const params=new URLSearchParams({title:q.title, limit:"1", fields:"title,author_name,number_of_pages_median,cover_i,subject"});
+  if(q.author) params.set("author",q.author);
+  const s=await olFetch(OL+"/search.json?"+params);
+  const doc=(s.docs||[])[0];
+  if(!doc) return null;
+  return {title:doc.title||q.title, author:(doc.author_name||[]).join(", "), pages:Number(doc.number_of_pages_median)||0, coverUrl:olCover(doc.cover_i), subjects:doc.subject||[], isbn:""};
+}
+/* Turn a lookup result (or nothing) into form-ready fields. A CATALOG hit supplies level, genre and fun fact.
+   An ISBN names a specific edition, so its page count beats the catalog; a title search only gives a median, so the catalog wins there. */
+function draftFrom(r, typedTitle, byIsbn){
+  const cm=catalogMatch(r&&r.title) || catalogMatch(typedTitle);
+  const olPages=(r&&r.pages)||0, cPages=(cm&&cm.pages)||0;
+  const pages=byIsbn ? (olPages||cPages) : (cPages||olPages);
+  return {
+    title:(cm&&cm.title)||(r&&r.title)||typedTitle||"",
+    author:(cm&&cm.author)||(r&&r.author)||"",
+    pages:pages,
+    grade:cm?cm.grade:guessGrade(pages),
+    genre:cm?cm.genre:guessGenre(r&&r.subjects),
+    fact:cm?cm.fact:"",
+    coverUrl:(r&&r.coverUrl)||"",
+    isbn:(r&&r.isbn)||""
+  };
+}
+
+/* ---------- single-book ISBN lookup (Add a Book form) ---------- */
+let isbnBusy=false;
+async function isbnLookupForm(){
+  const raw=val("f_isbn"), st=$("isbn_status"); if(!st) return;
+  if(!looksLikeISBN(raw)){ st.innerHTML='<span style="color:var(--coral-deep);font-weight:800">An ISBN is 10 or 13 digits. It\'s printed above the barcode on the back cover.</span>'; return; }
+  if(isbnBusy) return;
+  isbnBusy=true; st.textContent="Looking up "+isbnClean(raw)+"…";
+  let r=null, failed=false;
+  try{ r=await olLookup({isbn:raw}); }catch(e){ failed=true; }
+  isbnBusy=false;
+  if(!$("isbn_status")) return;            /* user left the tab meanwhile */
+  if(!r){
+    $("isbn_status").innerHTML='<span style="color:var(--coral-deep);font-weight:800">'+(failed?"Couldn't reach Open Library. Check the connection, or fill in the details by hand.":"No match for that ISBN. Fill in the details by hand below.")+'</span>';
+    if($("lookup")) $("lookup").focus();
+    return;
+  }
+  const d=draftFrom(r,"",true);
+  $("lookup").value=d.title; $("f_author").value=d.author; $("f_pages").value=d.pages||"";
+  $("f_grade").value=d.grade; $("f_genre").value=d.genre; $("f_cover").value=d.coverUrl; $("f_fact").value=d.fact;
+  $("matches").innerHTML="";
+  const notes=[];
+  if(!d.pages) notes.push("no page count on file, enter it below");
+  if(!catalogMatch(d.title)) notes.push("reading level is a guess from page count");
+  $("isbn_status").innerHTML='<div style="display:flex;gap:10px;align-items:center">'
+    +(d.coverUrl?'<img src="'+esc(d.coverUrl)+'" alt="" style="width:34px;height:50px;object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.remove()">':'')
+    +'<div><strong style="color:var(--sage-deep)">Found:</strong> '+esc(d.title)+(d.author?' <span style="color:var(--ink-soft)">by '+esc(d.author)+'</span>':'')
+    +(notes.length?'<div style="color:var(--ink-soft)">'+esc(notes.join(" · "))+'</div>':'')+'</div></div>';
+  if(!d.pages) $("f_pages").focus();
+}
+
+/* ---------- bulk import ---------- */
+let bulk={text:"",rows:[],busy:false,done:0};
+const bulkReset = () => { bulk={text:"",rows:[],busy:false,done:0}; };
+function parseBulkLine(line){
+  const s=line.trim().replace(/^[-*•]\s+/,"");
+  if(looksLikeISBN(s)) return {isbn:s};
+  const m=s.match(/^(.*\S)\s+by\s+(\S.*)$/i);
+  return m ? {title:m[1].trim(), author:m[2].trim()} : {title:s};
+}
+const rowReady = r => !!(r.include && r.title && r.pages>0);
+function isDupe(title, idx){
+  const k=normTitle(title); if(!k) return false;
+  if(S.books.some(b=>normTitle(b.title)===k)) return true;
+  return bulk.rows.some((r,i)=>i<idx && r.status!=="wait" && r.status!=="dupe" && normTitle(r.title)===k);
+}
+function bulkStatusHTML(r){
+  const map={ok:["var(--sage-deep)","Found"], nopages:["var(--coral-deep)","Needs a page count"], missing:["var(--coral-deep)","Not found on Open Library, fill in by hand"],
+             error:["var(--coral-deep)","Couldn't reach Open Library, fill in by hand"], dupe:["var(--ink-soft)","Already in the library"], wait:["var(--ink-soft)","Looking up…"]};
+  const s=map[r.status]||map.wait;
+  const from = normTitle(r.line)!==normTitle(r.title) ? ' <span style="font-weight:400;color:var(--ink-soft)">· from “'+esc(r.line)+'”</span>' : '';
+  return '<span style="color:'+s[0]+'">'+s[1]+'</span>'+from;
+}
+function bulkFootHTML(){
+  const ready=bulk.rows.filter(rowReady).length;
+  const needs=bulk.rows.filter(r=>r.include && !rowReady(r) && r.status!=="wait").length;
+  return '<button class="btn sage" data-act="bulkadd"'+(ready&&!bulk.busy?'':' disabled')+'>Add '+ready+' book'+(ready===1?'':'s')+' to library</button>'
+    +(needs?'<span style="font-size:12px;color:var(--coral-deep);font-weight:800">'+needs+' checked '+(needs===1?'row needs':'rows need')+' a title and page count</span>':'');
+}
+function bulkActionsHTML(){
+  return '<button class="btn ink" data-act="bulklookup"'+(bulk.busy?' disabled':'')+'>'+(bulk.busy?'Looking up '+bulk.done+' of '+bulk.rows.length+'…':'Look up all')+'</button>'
+    +(bulk.rows.length&&!bulk.busy?'<button class="btn ghost" data-act="bulkclear">Clear</button>':'');
+}
+function bulkReviewHTML(){
+  if(!bulk.rows.length) return "";
+  let h='<div style="margin-top:14px">';
+  bulk.rows.forEach((r,i)=>{
+    h+='<div class="editrow" style="align-items:flex-start'+(r.status==="wait"?";opacity:.6":"")+'">'
+      +'<input type="checkbox" data-bulk="include" data-i="'+i+'"'+(r.include?' checked':'')+(r.status==="wait"?' disabled':'')+' style="margin-top:6px;width:18px;height:18px">'
+      +(r.coverUrl?'<img src="'+esc(r.coverUrl)+'" alt="" style="width:30px;height:44px;object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.remove()">'
+                  :'<div style="width:30px;height:44px;border-radius:4px;background:var(--parchment-deep);flex-shrink:0"></div>')
+      +'<div style="flex:1;min-width:150px">'
+      +'<input class="in" data-bulk="title" data-i="'+i+'" value="'+esc(r.title)+'" placeholder="Title" style="padding:5px 8px;font-size:14px;font-weight:800;margin-bottom:4px">'
+      +'<input class="in" data-bulk="author" data-i="'+i+'" value="'+esc(r.author)+'" placeholder="Author" style="padding:5px 8px;font-size:12px">'
+      +'<div id="bulk_st_'+i+'" style="font-size:11px;font-weight:800;margin-top:4px">'+bulkStatusHTML(r)+'</div></div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap">'
+      +'<input class="mini" type="number" min="1" placeholder="pages" data-bulk="pages" data-i="'+i+'" value="'+(r.pages||"")+'">'
+      +'<select class="mini" style="width:auto;font-family:var(--body)" data-bulk="grade" data-i="'+i+'">'+BANDS.map(b=>'<option'+(b===r.grade?' selected':'')+'>'+b+'</option>').join("")+'</select>'
+      +'<select class="mini" style="width:auto;font-family:var(--body)" data-bulk="genre" data-i="'+i+'">'+Object.keys(GENRES).map(g=>'<option'+(g===r.genre?' selected':'')+'>'+g+'</option>').join("")+'</select>'
+      +'</div></div>';
+  });
+  h+='<div id="bulk_foot" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px">'+bulkFootHTML()+'</div></div>';
+  return h;
+}
+/* Repaint only the bulk panel pieces so the single-book form keeps whatever's typed in it. */
+function refreshBulk(){
+  const a=$("bulk_actions"), v=$("bulk_review");
+  if(a) a.innerHTML=bulkActionsHTML();
+  if(v) v.innerHTML=bulkReviewHTML();
+}
+async function lookupRow(r, idx){
+  let res=null, failed=false;
+  const cm = !r.q.isbn && catalogMatch(r.q.title);   /* catalog hit still goes online, but only for the cover */
+  try{ res=await olLookup(r.q); }
+  catch(e){
+    /* one retry: phone connections drop for a second all the time */
+    await new Promise(ok=>setTimeout(ok,800));
+    try{ res=await olLookup(r.q); }catch(e2){ failed=true; }
+  }
+  Object.assign(r, draftFrom(res, r.q.title||"", !!r.q.isbn));
+  if(!r.author && r.q.author) r.author=r.q.author;
+  const found=!!(res||cm);
+  if(!r.title) r.status=failed?"error":"missing";
+  else if(isDupe(r.title, idx)){ r.status="dupe"; r.include=false; }
+  else if(!found) r.status=failed?"error":"missing";
+  else if(!r.pages) r.status="nopages";
+  else r.status="ok";
+}
+async function bulkLookup(){
+  if(bulk.busy) return;
+  const lines=bulk.text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(!lines.length){ toast("Paste at least one line"); return; }
+  bulk.rows=lines.map(line=>{ const q=parseBulkLine(line);
+    return {line, q, title:q.title||"", author:q.author||"", pages:0, grade:"2nd-3rd", genre:"Other", fact:"", coverUrl:"", isbn:q.isbn||"", status:"wait", include:true}; });
+  bulk.busy=true; bulk.done=0; refreshBulk();
+  const rows=bulk.rows; let next=0;
+  const worker=async()=>{ while(next<rows.length){ const i=next++; await lookupRow(rows[i], i); bulk.done++; if(bulk.rows===rows) refreshBulk(); } };
+  await Promise.all([worker(),worker(),worker()]);     /* three at a time: quick, and polite to Open Library */
+  if(bulk.rows===rows){ bulk.busy=false; refreshBulk(); }
+}
+
+/* ============================================================
    KID VIEW
    ============================================================ */
 function kidCard(b){
@@ -568,7 +774,12 @@ function parentView(){
   }
 
   if(tab==="add"){
-    h+='<div class="panel" style="max-width:620px"><label class="f">Start typing a title</label>'
+    h+='<div class="panel" style="max-width:620px">'
+     +'<label class="f">Have the ISBN?</label>'
+     +'<div style="display:flex;gap:8px"><input class="in" id="f_isbn" inputmode="numeric" autocomplete="off" placeholder="978… (above the barcode on the back)" style="flex:1;min-width:0">'
+     +'<button class="btn ink" data-act="isbn" style="flex-shrink:0;padding:9px 16px">Look up</button></div>'
+     +'<div id="isbn_status" style="font-size:12px;color:var(--ink-soft);margin:6px 0 16px">Fills in title, author, pages and cover from Open Library.</div>'
+     +'<label class="f">Or start typing a title</label>'
      +'<input class="in" id="lookup" placeholder="e.g. Charlotte\'s Web" autocomplete="off">'
      +'<div id="matches"></div>'
      +'<p style="font-size:12px;color:var(--ink-soft);margin:6px 0 16px">Picking a match fills everything in. Not listed? Type it yourself.</p>'
@@ -581,6 +792,13 @@ function parentView(){
      +'<div style="margin-top:12px"><label class="f">Cover image URL (optional)</label><input class="in" id="f_cover" placeholder="https://…"></div>'
      +'<div style="margin-top:12px"><label class="f">Fun fact (optional)</label><textarea class="in" id="f_fact" rows="2"></textarea></div>'
      +'<button class="btn ink" style="margin-top:16px" data-act="addbook">+ Add to library</button></div>';
+
+    h+='<div class="panel" style="max-width:620px">'
+     +'<h3 style="font-family:var(--display);font-weight:700;margin-bottom:4px">Bulk import</h3>'
+     +'<p style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">Paste titles or ISBNs, one per line. “Title by Author” works too. Each line is looked up on Open Library and you can fix anything before adding.</p>'
+     +'<textarea class="in" id="bulk_text" rows="6" placeholder="Ramona the Pest by Beverly Cleary&#10;9780064400558&#10;The Wild Robot">'+esc(bulk.text)+'</textarea>'
+     +'<div id="bulk_actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">'+bulkActionsHTML()+'</div>'
+     +'<div id="bulk_review">'+bulkReviewHTML()+'</div></div>';
   }
 
   if(tab==="log"){
@@ -778,8 +996,24 @@ document.addEventListener("click", ev => {
       const title=val("lookup").trim(), pages=num("f_pages");
       if(!title||!pages){ toast("Add a title and page count"); break; }
       S.books.push({id:uid(),title:title,author:val("f_author"),grade:val("f_grade"),pages:pages,
-                    genre:val("f_genre"),fact:val("f_fact"),coverUrl:val("f_cover").trim()});
+                    genre:val("f_genre"),fact:val("f_fact"),coverUrl:val("f_cover").trim(),
+                    isbn:looksLikeISBN(val("f_isbn"))?isbnClean(val("f_isbn")):""});
       save(); tab="library"; scrollMem=0; render(); toast("Added to library");
+      break;
+    }
+    case "isbn": isbnLookupForm(); break;
+    case "bulklookup": bulkLookup(); break;
+    case "bulkclear": { bulkReset(); const t=$("bulk_text"); if(t) t.value=""; refreshBulk(); break; }
+    case "bulkadd": {
+      const seen=new Set(S.books.map(b=>normTitle(b.title))); let n=0;
+      bulk.rows.forEach(r=>{
+        if(!rowReady(r)) return;
+        const k=normTitle(r.title); if(seen.has(k)) return; seen.add(k);
+        S.books.push({id:uid(),title:r.title.trim(),author:r.author.trim(),grade:r.grade,pages:Number(r.pages),genre:r.genre,fact:r.fact||"",coverUrl:r.coverUrl||"",isbn:r.isbn||""});
+        n++;
+      });
+      if(!n){ toast("Nothing ready to add"); break; }
+      bulkReset(); save(); tab="library"; scrollMem=0; render(); toast("Added "+n+" book"+(n===1?"":"s"));
       break;
     }
     case "delbook": S.books=S.books.filter(b=>b.id!==id); S.reading=S.reading.filter(x=>x!==id); save(); rerender(); break;
@@ -821,10 +1055,25 @@ document.addEventListener("change", ev => {
     S.config[el.dataset.cfg]=Math.max(el.dataset.cfg==="pagesPerPoint"?1:0, Number(el.value)||0);
     save(); rerender();
   }
+  if(el.dataset.bulk){
+    const i=Number(el.dataset.i), r=bulk.rows[i]; if(!r) return;
+    const f=el.dataset.bulk;
+    if(f==="include") r.include=el.checked;
+    else if(f==="pages") r.pages=Math.max(0, Number(el.value)||0);
+    else r[f]=el.value;
+    if((f==="title"||f==="pages") && r.status!=="dupe" && r.status!=="wait" && r.title) r.status = r.pages>0 ? "ok" : "nopages";
+    const st=$("bulk_st_"+i), ft=$("bulk_foot");
+    if(st) st.innerHTML=bulkStatusHTML(r);
+    if(ft) ft.innerHTML=bulkFootHTML();
+  }
+});
+document.addEventListener("keydown", ev => {
+  if(ev.key==="Enter" && ev.target.id==="f_isbn"){ ev.preventDefault(); isbnLookupForm(); }
 });
 
 /* catalog autocomplete */
 document.addEventListener("input", ev => {
+  if(ev.target.id==="bulk_text"){ bulk.text=ev.target.value; return; }
   if(ev.target.id!=="lookup") return;
   const q=ev.target.value.toLowerCase().trim();
   const box=$("matches"); if(!box) return;
