@@ -162,6 +162,16 @@ label.f{display:block;font-size:12px;font-weight:800;margin-bottom:5px}
 .libitem{display:flex;gap:12px;background:var(--paper);border:1px solid var(--parchment-deep);border-radius:12px;padding:12px}
 .libgrid{display:grid;grid-template-columns:1fr;gap:12px}
 @media(min-width:700px){.libgrid{grid-template-columns:1fr 1fr}}
+
+/* ---------- library search / filter bar ---------- */
+.fbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;align-items:center}
+.fbar .in{width:auto;flex:1 1 120px;padding:8px 10px;min-width:0}
+.fbar .q{flex:1 1 100%;padding:10px 12px 10px 38px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233C4A6B' stroke-width='2.5' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") 12px center/18px no-repeat}
+@media(min-width:640px){.fbar .q{flex:2 1 240px}}
+.fbar select.in{appearance:auto;font-size:14px;font-weight:700;color:var(--ink-soft)}
+.fbar select.in.on{border-color:var(--marigold);color:var(--ink)}
+.fbar .clr{font-size:12px;font-weight:800;color:var(--coral-deep);text-decoration:underline;padding:6px 4px}
+.fcount{font-size:12px;font-weight:800;color:var(--ink-soft);margin:-6px 0 12px}
 .trash{color:var(--coral-deep);padding:5px;align-self:flex-start}
 
 /* ---------- modal / toast ---------- */
@@ -395,6 +405,79 @@ function tagsHTML(b){
     +'<span class="genre-line" style="color:'+g.c+'">'+g.e+' '+esc(b.genre)+'</span></div>';
 }
 const fmtDate = d => new Date(d+"T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"});
+
+/* ============================================================
+   LIBRARY SEARCH, FILTER, SORT
+   Two independent filter states: one for Hannah's shelf, one for
+   the parent Library tab. Transient, never saved.
+   ============================================================ */
+const fltBlank = () => ({q:"", genre:"", grade:"", pages:"", sort:"title"});
+let flt = {kid:fltBlank(), parent:fltBlank()};
+const PAGE_BANDS = [["","Any length"],["u50","Under 50 pages"],["50-150","50 to 150 pages"],["150-300","150 to 300 pages"],["300","300+ pages"]];
+const SORTS = [["title","A to Z"],["short","Shortest first"],["long","Longest first"],["easy","Easiest first"],["hard","Hardest first"],["pts","Most points"],["new","Newest added"]];
+const fltActive = f => !!(f.q||f.genre||f.grade||f.pages);
+function pageBandOk(p,band){
+  p=Number(p)||0;
+  return band==="u50"?p<50 : band==="50-150"?p>=50&&p<150 : band==="150-300"?p>=150&&p<300 : band==="300"?p>=300 : true;
+}
+function applyFlt(books, f){
+  const words=f.q.toLowerCase().split(/\s+/).filter(Boolean);
+  let out=books.filter(b=>{
+    if(f.genre && b.genre!==f.genre) return false;
+    if(f.grade && b.grade!==f.grade) return false;
+    if(!pageBandOk(b.pages,f.pages)) return false;
+    if(words.length){ const hay=(b.title+" "+b.author).toLowerCase(); if(!words.every(w=>hay.includes(w))) return false; }
+    return true;
+  });
+  const idx=b=>S.books.indexOf(b), lvl=b=>DIFF[b.grade]||1, pts=b=>basePts(b.pages,b.grade);
+  const cmp={
+    title:(a,b)=>a.title.localeCompare(b.title,undefined,{sensitivity:"base",ignorePunctuation:true}),
+    short:(a,b)=>a.pages-b.pages, long:(a,b)=>b.pages-a.pages,
+    easy:(a,b)=>lvl(a)-lvl(b)||a.pages-b.pages, hard:(a,b)=>lvl(b)-lvl(a)||b.pages-a.pages,
+    pts:(a,b)=>pts(b)-pts(a), new:(a,b)=>idx(b)-idx(a)
+  }[f.sort]||((a,b)=>0);
+  return out.sort(cmp);
+}
+function fltBarHTML(scope, books){
+  const f=flt[scope], kid=scope==="kid";
+  const genres=Object.keys(GENRES).filter(g=>books.some(b=>b.genre===g));
+  const grades=BANDS.filter(g=>books.some(b=>b.grade===g));
+  const sel=(key,opts,blank)=>'<select class="in'+(f[key]?" on":"")+'" data-flt="'+key+'" data-scope="'+scope+'" aria-label="'+blank+'">'
+    +'<option value="">'+blank+'</option>'+opts.map(([v,l])=>'<option value="'+esc(v)+'"'+(f[key]===v?' selected':'')+'>'+esc(l)+'</option>').join("")+'</select>';
+  return '<div class="fbar">'
+    +'<input class="in q" type="search" data-flt="q" data-scope="'+scope+'" value="'+esc(f.q)+'" placeholder="'+(kid?"Find a book or author…":"Search title or author")+'" autocomplete="off" aria-label="Search books">'
+    +sel("genre",genres.map(g=>[g,(GENRES[g]||GENRES.Other).e+" "+g]),kid?"Any kind":"All genres")
+    +sel("grade",grades.map(g=>[g,g]),kid?"Any level":"All levels")
+    +sel("pages",PAGE_BANDS.slice(1),kid?"Any length":"Any length")
+    +'<select class="in" data-flt="sort" data-scope="'+scope+'" aria-label="Sort">'+SORTS.map(([v,l])=>'<option value="'+v+'"'+(f.sort===v?' selected':'')+'>'+(kid?"":"Sort: ")+l+'</option>').join("")+'</select>'
+    +(fltActive(f)?'<button class="clr" data-act="fltclear" data-id="'+scope+'">Clear</button>':'')
+    +'</div>';
+}
+function libItemHTML(b){
+  const g=GENRES[b.genre]||GENRES.Other, p=openPages(b.id);
+  return '<div class="libitem">'+coverHTML(b,56,82)+'<div style="flex:1;min-width:0">'
+   +'<div style="font-weight:800;font-size:14px;line-height:1.2">'+esc(b.title)+'</div>'
+   +'<div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px">'+esc(b.author)+'</div>'
+   +'<div class="tags" style="margin:0"><span class="pill" style="background:'+g.c+'">'+esc(b.grade)+'</span>'
+   +'<span class="pill" style="background:var(--ink)">'+b.pages+'p</span>'
+   +'<span class="pill" style="background:var(--marigold);color:var(--ink)">'+basePts(b.pages,b.grade)+' pts</span></div>'
+   +(p>0?'<div style="font-family:var(--score);font-size:10px;color:var(--plum-deep);margin-top:6px">'+p+' pages read · '+progPts(b,p)+' pts earned</div>':'')
+   +'</div><button class="trash" data-act="delbook" data-id="'+b.id+'">🗑</button></div>';
+}
+/* The list under the bar, repainted on its own while typing so the search box keeps focus. */
+function libResultsHTML(scope, books){
+  const f=flt[scope], hits=applyFlt(books,f), kid=scope==="kid";
+  let h='<div class="fcount">'+(fltActive(f)?'Showing '+hits.length+' of '+books.length:books.length+(kid?' books':' books in the library'))+'</div>';
+  if(!hits.length) h+='<p class="muted">'+(kid?"No books match that. Try a different search, or clear it.":"No books match these filters.")+'</p>';
+  else if(kid) h+='<div class="grid">'+hits.map(kidCard).join("")+'</div>';
+  else h+='<div class="libgrid">'+hits.map(libItemHTML).join("")+'</div>';
+  return h;
+}
+const shelfBooks = () => S.books.filter(b=>!S.reading.includes(b.id));
+function refreshFlt(scope){
+  const box=$("lib_results_"+scope); if(!box) return;
+  box.innerHTML=libResultsHTML(scope, scope==="kid"?shelfBooks():S.books);
+}
 
 /* ============================================================
    OPEN LIBRARY LOOKUP (free, no key)
@@ -698,8 +781,10 @@ function kidView(){
   if(reading.length){
     h+='<section><h2 class="sec">🔖 Reading right now</h2><div class="grid">'+reading.map(kidCard).join("")+'</div></section>';
   }
-  h+='<section><h2 class="sec">📚 Books on my shelf <span class="count">'+shelf.length+'</span></h2>'
-   +(shelf.length?'<div class="grid">'+shelf.map(kidCard).join("")+'</div>':'<p class="muted">Every book is off the shelf right now. Ask a grown-up to add more!</p>')+'</section>';
+  h+='<section><h2 class="sec">📚 Books on my shelf <span class="count">'+shelf.length+'</span></h2>';
+  if(!shelf.length) h+='<p class="muted">Every book is off the shelf right now. Ask a grown-up to add more!</p>';
+  else h+=fltBarHTML("kid",shelf)+'<div id="lib_results_kid">'+libResultsHTML("kid",shelf)+'</div>';
+  h+='</section>';
 
   h+='<section><h2 class="sec">✅ Books I\'ve finished <span class="count">'+S.completions.length+'</span></h2>';
   if(!S.completions.length) h+='<p class="muted">Nothing here yet — finish a book and it lands on this shelf.</p>';
@@ -758,19 +843,8 @@ function parentView(){
   h+='</div></div></div><div class="wrap" style="padding-top:28px;padding-bottom:60px">';
 
   if(tab==="library"){
-    h+='<div class="libgrid">';
-    S.books.forEach(b=>{
-      const g=GENRES[b.genre]||GENRES.Other, p=openPages(b.id);
-      h+='<div class="libitem">'+coverHTML(b,56,82)+'<div style="flex:1;min-width:0">'
-       +'<div style="font-weight:800;font-size:14px;line-height:1.2">'+esc(b.title)+'</div>'
-       +'<div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px">'+esc(b.author)+'</div>'
-       +'<div class="tags" style="margin:0"><span class="pill" style="background:'+g.c+'">'+esc(b.grade)+'</span>'
-       +'<span class="pill" style="background:var(--ink)">'+b.pages+'p</span>'
-       +'<span class="pill" style="background:var(--marigold);color:var(--ink)">'+basePts(b.pages,b.grade)+' pts</span></div>'
-       +(p>0?'<div style="font-family:var(--score);font-size:10px;color:var(--plum-deep);margin-top:6px">'+p+' pages read · '+progPts(b,p)+' pts earned</div>':'')
-       +'</div><button class="trash" data-act="delbook" data-id="'+b.id+'">🗑</button></div>';
-    });
-    h+='</div>';
+    if(!S.books.length) h+='<p class="muted">No books yet. Add one from the Add a Book tab.</p>';
+    else h+=fltBarHTML("parent",S.books)+'<div id="lib_results_parent">'+libResultsHTML("parent",S.books)+'</div>';
   }
 
   if(tab==="add"){
@@ -1001,6 +1075,7 @@ document.addEventListener("click", ev => {
       save(); tab="library"; scrollMem=0; render(); toast("Added to library");
       break;
     }
+    case "fltclear": flt[id]=Object.assign(fltBlank(),{sort:flt[id].sort}); rerender(); break;
     case "isbn": isbnLookupForm(); break;
     case "bulklookup": bulkLookup(); break;
     case "bulkclear": { bulkReset(); const t=$("bulk_text"); if(t) t.value=""; refreshBulk(); break; }
@@ -1055,6 +1130,10 @@ document.addEventListener("change", ev => {
     S.config[el.dataset.cfg]=Math.max(el.dataset.cfg==="pagesPerPoint"?1:0, Number(el.value)||0);
     save(); rerender();
   }
+  if(el.dataset.flt && el.dataset.flt!=="q"){
+    flt[el.dataset.scope][el.dataset.flt]=el.value;
+    rerender();                       /* the bar itself changes (highlight, Clear button), so repaint the page */
+  }
   if(el.dataset.bulk){
     const i=Number(el.dataset.i), r=bulk.rows[i]; if(!r) return;
     const f=el.dataset.bulk;
@@ -1073,6 +1152,7 @@ document.addEventListener("keydown", ev => {
 
 /* catalog autocomplete */
 document.addEventListener("input", ev => {
+  if(ev.target.dataset.flt==="q"){ flt[ev.target.dataset.scope].q=ev.target.value; refreshFlt(ev.target.dataset.scope); return; }
   if(ev.target.id==="bulk_text"){ bulk.text=ev.target.value; return; }
   if(ev.target.id!=="lookup") return;
   const q=ev.target.value.toLowerCase().trim();

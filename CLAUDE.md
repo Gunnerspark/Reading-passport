@@ -21,6 +21,13 @@ currently being read, the shelf, finished books, recent reading log, prize shelf
 **Parent dashboard** (link at the bottom of the kid view) — tabs for Library, Add a
 Book, Reading Log, Streaks, Prizes & Points, Stats.
 
+**Library search** — the kid shelf and the parent Library tab share one filter bar
+(`fltBarHTML` / `applyFlt`): free-text over title + author, genre, reading level,
+page band, and sort. Filter state lives in `flt.kid` / `flt.parent`, transient and
+never saved. Typing repaints only the results container so the search box keeps
+focus; changing a select repaints the page. Genre and level dropdowns list only
+values present in the library.
+
 ## Points system
 
 A book's **base value** = `ceil(pages / pagesPerPoint) + (readingLevel 1-5 × difficultyBonus)`.
