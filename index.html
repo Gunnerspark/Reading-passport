@@ -115,6 +115,47 @@ h2.sec{font-family:var(--display);font-size:19px;font-weight:700;display:flex;al
 .node .sub{font-size:9px;color:var(--ink-soft);text-align:center}
 .track-space{height:96px}
 
+/* ---------- Librarian button (top bar) ---------- */
+.toprow{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:4px}
+.libbtn{font-size:12px;font-weight:800;color:var(--parchment);background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:99px;padding:5px 12px;display:inline-flex;align-items:center;gap:6px}
+.libbtn:hover{background:rgba(255,255,255,.2)}
+.libbtn:focus-visible,.spine:focus-visible{outline:3px solid var(--marigold);outline-offset:2px}
+
+/* ---------- the bookcase ----------
+   One flex-wrap row of spines; every line is exactly --row tall, and the planks are
+   painted as a repeating background at that same height, so each line of books sits
+   on a plank at any screen width. Collapsed = two planks' worth of height. */
+.bookcase{--row:232px;--plank:14px;position:relative;background:#7A4E2A;border-radius:14px;padding:12px;box-shadow:0 8px 22px rgba(31,42,68,.25), inset 0 0 0 3px rgba(0,0,0,.08)}
+.bookcase .inner{display:flex;flex-wrap:wrap;align-content:flex-start;padding:0 10px;border-radius:6px;
+  background:repeating-linear-gradient(to bottom,#2E3A5C 0,#26314F calc(var(--row) - var(--plank)),#C98B4F calc(var(--row) - var(--plank)),#B07640 calc(var(--row) - 4px),#8A5A31 calc(var(--row) - 4px),#8A5A31 var(--row));
+  overflow:hidden;transition:max-height .45s ease}
+.bookcase.shut .inner{max-height:calc(var(--row) * 2)}
+.slot{height:var(--row);display:flex;align-items:flex-end;padding-bottom:var(--plank)}
+.spine{position:relative;margin-right:3px;border-radius:3px 3px 1px 1px;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:space-between;
+  padding:9px 0 7px;box-shadow:inset -4px 0 0 rgba(0,0,0,.18), inset 3px 0 0 rgba(255,255,255,.18);transition:transform .18s ease;transform-origin:bottom center}
+.spine:hover{transform:translateY(-9px)}
+.spine:hover,.spine:focus-visible{z-index:3}
+/* point tag: a little coin label that rises out of the top of the spine on hover */
+.spine .pts{position:absolute;bottom:100%;left:50%;margin-bottom:6px;transform:translate(-50%,6px) scale(.85);opacity:0;pointer-events:none;
+  white-space:nowrap;background:var(--marigold);color:var(--ink);font-family:var(--score);font-weight:700;font-size:12px;line-height:1;
+  padding:5px 8px 5px 6px;border-radius:99px;border:2px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.3);display:flex;align-items:center;gap:4px;
+  transition:opacity .15s ease, transform .18s ease}
+.spine .pts::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#fff}
+.spine:hover .pts,.spine:focus-visible .pts{opacity:1;transform:translate(-50%,0) scale(1)}
+.spine.lean .pts{transform:translate(-50%,6px) rotate(5deg) scale(.85)}
+.spine.lean:hover .pts,.spine.lean:focus-visible .pts{transform:translate(-50%,0) rotate(5deg) scale(1)}
+.spine.lean{transform:rotate(-5deg);margin:0 7px 0 5px}
+.spine.lean:hover{transform:rotate(-5deg) translateY(-9px)}
+.spine .band{width:100%;height:3px;background:rgba(255,255,255,.4)}
+.spine .st{writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--display);font-weight:800;font-size:11.5px;line-height:1.05;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin:6px 0;text-shadow:0 1px 2px rgba(0,0,0,.35)}
+.spine .ge{font-size:13px;line-height:1}
+.spine.thin .st{font-size:10px}
+.spine .dotr{position:absolute;top:-6px;right:-4px;width:12px;height:12px;border-radius:99px;background:var(--sage);border:2px solid #fff}
+.shelfmore{display:block;margin:12px auto 0;font-family:var(--display);font-weight:700;font-size:14px;color:#FBE7C6;background:rgba(0,0,0,.2);border-radius:99px;padding:7px 16px}
+.modal .card{box-shadow:none;border:none;padding:0}
+@media (prefers-reduced-motion:reduce){.spine,.bookcase .inner{transition:none}}
+
 /* ---------- shelves / prizes ---------- */
 .shelf{background:rgba(243,230,200,.6);border-bottom:6px solid var(--ink-soft);border-radius:16px;padding:20px;overflow-x:auto}
 .shelf-row{display:flex;gap:16px}
@@ -491,14 +532,46 @@ function libResultsHTML(scope, books){
   const f=flt[scope], hits=applyFlt(books,f), kid=scope==="kid";
   let h='<div class="fcount">'+(fltActive(f)?'Showing '+hits.length+' of '+books.length:books.length+(kid?' books':' books in the library'))+'</div>';
   if(!hits.length) h+='<p class="muted">'+(kid?"No books match that. Try a different search, or clear it.":"No books match these filters.")+'</p>';
-  else if(kid) h+='<div class="grid">'+hits.map(kidCard).join("")+'</div>';
+  else if(kid) h+=bookcaseHTML(hits, fltActive(f));
   else h+='<div class="libgrid">'+hits.map(libItemHTML).join("")+'</div>';
   return h;
 }
+/* ---------- Hannah's bookcase: spines on planks; tap one to pull it out ---------- */
+let caseOpen=false;
+const hashN = s => { let h=7; for(const ch of String(s)) h=(h*31+ch.charCodeAt(0))>>>0; return h; };
+function spineHTML(b){
+  const g=GENRES[b.genre]||GENRES.Other, n=hashN(b.id||b.title);
+  const p=Number(b.pages)||60;
+  const w=Math.round(Math.max(22, Math.min(46, 16+Math.sqrt(p)*1.9)));   /* thicker book, wider spine */
+  const ht=142+(n%5)*8;                                                      /* a few heights, like a real shelf */
+  const shade=["","brightness(1.08)","brightness(.9)","saturate(1.15)",""][n%5];
+  const lean=(n%9===4)?" lean":"";
+  const started=openPages(b.id)>0;
+  return '<div class="slot"><button class="spine'+lean+(w<28?" thin":"")+'" data-act="pullbook" data-id="'+b.id+'" aria-label="'+esc(b.title)+', '+basePts(b.pages,b.grade)+' points"'
+    +' style="width:'+w+'px;height:'+ht+'px;background:'+g.c+(shade?';filter:'+shade:'')+'">'
+    +'<span class="pts" aria-hidden="true">🪙 '+basePts(b.pages,b.grade)+'</span>'
+    +(started?'<span class="dotr" title="Started"></span>':'')
+    +'<span class="band"></span><span class="st">'+esc(b.title)+'</span><span class="ge">'+g.e+'</span><span class="band"></span></button></div>';
+}
+function bookcaseHTML(books, filtering){
+  const many=books.length>12 && !filtering;          /* a short list or a search result shows in full */
+  const shut=many && !caseOpen;
+  return '<div class="bookcase'+(shut?" shut":"")+'"><div class="inner">'+books.map(spineHTML).join("")+'</div>'
+    +(many?'<button class="shelfmore" data-act="caseopen">'+(caseOpen?"Close the bookcase":"Open the whole bookcase")+'</button>':'')
+    +'</div><p class="muted" style="margin-top:8px;font-size:12px">Tap a book to take it off the shelf.</p>';
+}
+/* Only offer "Open the whole bookcase" when books are actually hidden at this screen width. */
+function fitCase(){
+  const c=document.querySelector(".bookcase"); if(!c) return;
+  const inner=c.querySelector(".inner"), btn=c.querySelector(".shelfmore"); if(!btn) return;
+  btn.style.display = (caseOpen || inner.scrollHeight > inner.clientHeight+2) ? "" : "none";
+}
+window.addEventListener("resize", fitCase);
 const shelfBooks = () => S.books.filter(b=>!S.reading.includes(b.id));
 function refreshFlt(scope){
   const box=$("lib_results_"+scope); if(!box) return;
   box.innerHTML=libResultsHTML(scope, scope==="kid"?shelfBooks():S.books);
+  fitCase();
 }
 
 /* ============================================================
@@ -795,8 +868,9 @@ function kidView(){
   const shelf=S.books.filter(b=>!S.reading.includes(b.id));
   const pending=S.streakAwards.filter(a=>a.type==="prize"&&!a.fulfilled);
 
-  let h='<div class="topbar"><div class="wrap"><div class="topbar-row"><div>'
-   +'<div class="eyebrow">Reading Passport</div><h1>'+esc(KID_NAME)+"'s Bookshelf</h1></div>"
+  let h='<div class="topbar"><div class="wrap">'
+   +'<div class="toprow"><div class="eyebrow">Reading Passport</div><button class="libbtn" data-act="toparent">🔑 Librarian</button></div>'
+   +'<div class="topbar-row"><div><h1>'+esc(KID_NAME)+"'s Bookshelf</h1></div>"
    +'<div class="bank">🪙<div><span class="n">'+bal+'</span><span class="l">points</span></div></div></div>'
    +'<div class="chips"><span class="chip">🔥 '+curStreak()+'-day streak</span>'
    +'<span class="chip">📖 '+wp+' pages this week</span><span class="chip">⏱ '+wm+' min this week</span></div>'
@@ -855,7 +929,6 @@ function kidView(){
   });
   h+='</div></section>';
 
-  h+='<button class="linky" style="margin-top:40px;opacity:.6" data-act="toparent">Parent Dashboard →</button>';
   return h+'</div>';
 }
 
@@ -868,7 +941,7 @@ function parentView(){
    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:12px">'
    +'<button class="linky" data-act="tokid">← Back to '+esc(KID_NAME)+"'s view</button>"
    +'<span style="font-family:var(--score);font-weight:700;font-size:13px;background:rgba(242,169,59,.25);color:var(--marigold-deep);padding:6px 12px;border-radius:12px">🪙 '+bal+' pts</span></div>'
-   +'<h1 style="font-family:var(--display);font-size:24px;font-weight:800">Parent Dashboard</h1><div class="tabs">';
+   +'<h1 style="font-family:var(--display);font-size:24px;font-weight:800">Librarian\'s Desk</h1><div class="tabs">';
   [["library","Library"],["add","Add a Book"],["log","Reading Log"],["streak","Streaks"],["prizes","Prizes & Points"],["stats","Stats"]]
     .forEach(([k,l])=>{ h+='<button class="tab'+(tab===k?" on":"")+'" data-act="tab" data-id="'+k+'">'+l+'</button>'; });
   h+='</div></div></div><div class="wrap" style="padding-top:28px;padding-bottom:60px">';
@@ -1015,6 +1088,10 @@ let mRating=5;
 function modalHTML(){
   if(!modal) return "";
   const b=S.books.find(x=>x.id===modal.bookId); if(!b) return "";
+  if(modal.type==="book"){
+    return '<div class="modal-bg" data-act="closebg"><div class="modal">'+kidCard(b)
+     +'<button class="btn ghost" style="width:100%;margin-top:10px" data-act="closem">Put it back</button></div></div>';
+  }
   if(modal.type==="log"){
     return '<div class="modal-bg" data-act="closebg"><div class="modal">'
      +'<h3>Reading log</h3><p style="font-weight:800;color:var(--plum-deep);margin-bottom:18px">'+esc(b.title)+'</p>'
@@ -1046,6 +1123,7 @@ function render(){
   document.getElementById("app").innerHTML = view==="kid" ? kidView() : parentView();
   document.getElementById("modal").innerHTML = modalHTML();
   window.scrollTo(0, scrollMem);
+  fitCase();
 }
 let scrollMem=0;
 function rerender(){ scrollMem=window.scrollY; render(); }
@@ -1065,7 +1143,9 @@ document.addEventListener("click", ev => {
     case "tokid": view="kid"; scrollMem=0; render(); window.scrollTo(0,0); break;
     case "tab": tab=id; scrollMem=0; render(); window.scrollTo(0,0); break;
     case "fact": factOpen[id]=!factOpen[id]; rerender(); break;
-    case "start": if(!S.reading.includes(id)) S.reading.push(id); save(); rerender(); toast("Happy reading!"); break;
+    case "pullbook": modal={type:"book",bookId:id}; rerender(); break;
+    case "caseopen": caseOpen=!caseOpen; rerender(); break;
+    case "start": if(!S.reading.includes(id)) S.reading.push(id); if(modal&&modal.type==="book") modal=null; save(); rerender(); toast("Happy reading!"); break;
     case "stop": S.reading=S.reading.filter(x=>x!==id); save(); rerender(); break;
     case "logmodal": modal={type:"log",bookId:id}; render(); break;
     case "finmodal": modal={type:"fin",bookId:id}; mRating=5; render(); break;
