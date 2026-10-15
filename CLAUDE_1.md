@@ -1,0 +1,143 @@
+# Reading Passport
+
+A reading tracker and rewards app built for my daughter Hannah (age 7). Two parents
+(me and her mother, in separate households) both use it; Hannah logs her reading with
+help from whichever parent she's with.
+
+## What it is
+
+`index.html` — one self-contained file. No build step, no dependencies, no framework.
+Plain CSS and vanilla JS. It's deployed to GitHub Pages and both parents add it to
+their phone home screens.
+
+Keep it a single file unless there's a strong reason not to. If you split it up, it
+still has to deploy to GitHub Pages as static files with no build step.
+
+## Two views
+
+**Kid view** (default) — points bank in a sticky header, monthly streak panel, books
+currently being read, the shelf, finished books, recent reading log, prize shelf.
+
+**Parent dashboard** (link at the bottom of the kid view) — tabs for Library, Add a
+Book, Reading Log, Streaks, Prizes & Points, Stats.
+
+**Library search** — the kid shelf and the parent Library tab share one filter bar
+(`fltBarHTML` / `applyFlt`): free-text over title + author, genre, reading level,
+page band, and sort. Filter state lives in `flt.kid` / `flt.parent`, transient and
+never saved. Typing repaints only the results container so the search box keeps
+focus; changing a select repaints the page. Genre and level dropdowns list only
+values present in the library.
+
+## Points system
+
+A book's **base value** = `ceil(pages / pagesPerPoint) + (readingLevel 1-5 × difficultyBonus)`.
+Defaults: `pagesPerPoint: 5`, `difficultyBonus: 8`, `completionBonus: 10`. All three are
+editable in the parent dashboard.
+
+Points accrue **progressively**: logging pages earns that fraction of the book's base
+value immediately. Finishing pays out the remainder plus the completion bonus, so a
+finished book always totals `base + bonus` regardless of how it was logged.
+
+**The balance is derived, never accumulated.** `balance()` recomputes from the log,
+completions, streak awards, and redemptions every render. This is deliberate — when a
+parent corrects a log entry ("she said 50 pages, meant 15"), points and streaks
+self-correct. Don't refactor this into an incrementing counter.
+
+## Streaks
+
+Reset every calendar month. `curStreak()` counts consecutive days with log entries,
+stopping at the 1st. `bestStreak()` finds the longest run in the month.
+
+Milestones at 5, 10, 20, 30 days:
+- 5 days → 10 bonus points (awarded automatically)
+- 10 days → $5 cash (parent hands out)
+- 20 days → Special Event (parent hands out)
+- 30 days → Special Prize (parent hands out)
+
+Milestones lock against **best** streak, not current — a missed day never takes back
+an already-earned prize. This is intentional; don't "fix" it.
+
+Real-world prizes appear as a banner in the kid view and in the parent Streaks tab
+with a "Mark as given" button.
+
+## Storage and sync
+
+Two modes, controlled by the CONFIG block at the top of the script:
+
+- Both `SUPABASE_URL` and `SUPABASE_KEY` blank → localStorage only, this device.
+- Both filled in → Supabase sync. Whole state stored as one JSONB blob in a
+  `reading_app` table, row id `hannah`. Pushes debounced 700ms. `syncNow()` runs every 15s
+  and whenever the app returns to the foreground or regains signal: it sends pending
+  changes (retrying after a failure), otherwise pulls.
+
+**Newest save wins**, with guard rails (all in the "storage" block of the script):
+
+- Each device remembers the server `updated_at` it last saw (`baseTs`). A push is a
+  compare-and-swap: `PATCH … &updated_at=eq.<baseTs>`.
+- `dirty` / `baseTs` / `dirtyAt` are persisted in localStorage (`reading-passport-v1-sync`),
+  so unsent changes survive a reload, or days offline. Boot sends them instead of pulling over them.
+- If the server moved on since this device last synced, the most recently edited copy wins
+  (`dirtyAt` vs the server's `updated_at`). The losing copy is parked in its own row so nothing
+  is lost: `hannah-replaced-<ts>` when the server copy lost, `hannah-device-<ts>` when this
+  device's copy lost (that device then shows a toast). To recover, copy `data` from the parked
+  row back into row `hannah`.
+- A pull reply is discarded if the user edited while it was in flight (`editRev`).
+- A device that has never synced adopts the server's copy rather than overwriting it.
+- This is not a merge. If two devices both edit while disconnected, one side's edits end up in a
+  parked row. Merging by record id (every record has a `uid()` id) is the next step if that ever
+  matters; deletions would then need tombstones, and edited records an `updatedAt`.
+
+Supabase free-tier projects pause after about a week of low activity. The app goes
+"offline — saved here" and keeps working locally; resume the project from the Supabase
+dashboard (restorable for 90 days after the pause) and the pending changes send themselves.
+
+The anon key is public in the repo. Fine for this — no sensitive data — but don't
+reuse that Supabase project for anything else.
+
+## Book covers and lookup
+
+Covers are generated procedurally from genre color + title typography + a watermark
+emoji. An optional `coverUrl` per book overrides this and falls back to the generated
+cover if the image fails to load.
+
+`CATALOG` is a hardcoded array of ~25 common kids' books with real page counts,
+grade bands, and fun facts, used for autocomplete when adding a book. A catalog hit
+also wins over an API result for reading level, genre and fun fact.
+
+**Open Library lookup** (no key, CORS-friendly) lives in the "OPEN LIBRARY LOOKUP"
+block of the script. `olLookup({isbn})` uses the Books API (`jscmd=data`) and falls
+back to the search index for a median page count / cover; the search index matches
+ISBNs loosely, so a fallback hit is only trusted if its `isbn` list contains the one
+asked for. `olLookup({title, author?})` uses `search.json`. Reading level and genre
+aren't in the API: `guessGrade()` is a page-count heuristic and `guessGenre()` keys
+off subject strings. Both are shown as editable defaults, never silently final.
+
+Add a Book tab has an ISBN field (single book, fills the form) and a **Bulk import**
+panel: one title or ISBN per line ("Title by Author" works), looked up three at a
+time, reviewed in an editable list, then added in one go. Rows with no page count
+are skipped on add (points need pages), duplicates of library titles are unchecked.
+Bulk state is transient (`bulk` variable), never saved. Books added via lookup carry
+an extra `isbn` field; nothing reads it yet.
+
+## Things I'd like to do next
+
+1. **Barcode scanning** from a phone camera so Hannah can scan books off the shelf.
+   The ISBN field is already there; this just needs to feed it.
+2. Reading level data is currently manual (K-1 through 5th+). Lexile or AR level
+   lookup would be better if there's a free source.
+
+## Conventions
+
+- Kid-facing copy is warm and direct, second person, no baby talk. She's 7 and reads
+  well. "You read today — streak is safe!" not "Great job little reader!"
+- Parent-facing copy is plain and functional.
+- Palette: ink navy `#1F2A44`, parchment `#FBF3E1`, marigold `#F2A93B`, coral
+  `#EF6F6C`, sage `#5FA98A`, plum `#7C5CBF`. Fonts: Baloo 2 (display), Nunito (body),
+  Space Mono (numbers). Don't drift from these.
+- Escape all user-entered strings with `esc()` before putting them in HTML.
+- Must work on a phone. Test at narrow widths.
+
+## Deploy
+
+Push to `main`. GitHub Pages serves it from the repo root. Live within a couple of
+minutes.
