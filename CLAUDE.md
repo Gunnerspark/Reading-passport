@@ -68,6 +68,13 @@ Two modes, controlled by the CONFIG block at the top of the script:
 - Both filled in → Supabase sync. Whole state stored as one JSONB blob in a
   `reading_app` table, row id `hannah`. Pushes debounced 700ms, pulls every 15s.
   Last-write-wins; acceptable since two parents rarely edit simultaneously.
+- **Offline guard.** localStorage key `reading-passport-unsynced` is "1" while the device
+  has edits the server hasn't confirmed ("0" once in step; missing = pre-guard device,
+  treated as unsynced). On startup an unsynced device runs `mergeStates(remote, local)`
+  instead of being overwritten: server wins for settings and shared items, device-only
+  items are added, streak awards dedupe by month+days, "given" prizes stay given. Added
+  2026-11-15 after the free Supabase project auto-paused (~a week idle) and phones went
+  offline. The 15s background pull never merges.
 
 The anon key is public in the repo. Fine for this — no sensitive data — but don't
 reuse that Supabase project for anything else.

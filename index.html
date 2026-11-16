@@ -323,6 +323,7 @@ function defaultState(){
 
 let S = defaultState();
 let view = "kid", tab = "library", modal = null, factOpen = {}, lastPull = 0, saveTimer = null, dirty = false;
+let saveSeq = 0, hasLocalCopy = false;
 
 /* ---------- points ---------- */
 const basePts = (pages,band) => Math.ceil((Number(pages)||1)/S.config.pagesPerPoint) + (DIFF[band]||1)*S.config.difficultyBonus;
@@ -373,8 +374,40 @@ function checkMilestones(){
 function setSync(t){ document.getElementById("sync").textContent = t; }
 function saveLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){} }
 
+/* ---------- unsynced-changes guard ----------
+   UNSYNCED_KEY is "1" while this device holds edits the server hasn't confirmed, "0" once
+   it's in step. Missing = a device from before this guard existed; treat it as maybe-unsynced.
+   On startup an unsynced device MERGES its copy into the server copy instead of being
+   overwritten by it, so reading logged while offline (e.g. server paused) isn't lost. */
+const UNSYNCED_KEY = "reading-passport-unsynced";
+function setUnsynced(on){ try{ localStorage.setItem(UNSYNCED_KEY, on ? "1" : "0"); }catch(e){} }
+function hasUnsynced(){ try{ return localStorage.getItem(UNSYNCED_KEY) !== "0"; }catch(e){ return false; } }
+
+/* Server copy wins for settings and for items both sides have; anything that exists only on
+   this device is added. Streak awards are matched by month+milestone so two phones that both
+   auto-awarded the same bonus don't pay it twice; a prize marked given on either side stays given. */
+function mergeStates(remote, local){
+  const out = Object.assign(defaultState(), remote);
+  ["books","log","completions","redeemed","rewards"].forEach(k=>{
+    const have = new Set((out[k]||[]).map(x=>x.id));
+    out[k] = (out[k]||[]).concat((local[k]||[]).filter(x=>x && !have.has(x.id)));
+  });
+  const awKey = a => a.month+"|"+a.days;
+  const aw = new Map((out.streakAwards||[]).map(a=>[awKey(a),a]));
+  (local.streakAwards||[]).forEach(a=>{
+    const r = aw.get(awKey(a));
+    if(!r) aw.set(awKey(a), a);
+    else if(a.fulfilled && !r.fulfilled) aw.set(awKey(a), Object.assign({}, r, {fulfilled:a.fulfilled}));
+  });
+  out.streakAwards = [...aw.values()];
+  const ids = new Set(out.books.map(b=>b.id));
+  out.reading = [...new Set([...(out.reading||[]), ...(local.reading||[])])].filter(id=>ids.has(id));
+  return out;
+}
+
 async function pushRemote(){
   if(!SYNC_ON) return;
+  const seqAtStart = saveSeq;
   try{
     setSync("saving…");
     const r = await fetch(SUPABASE_URL+"/rest/v1/reading_app",{
@@ -384,6 +417,7 @@ async function pushRemote(){
       body: JSON.stringify([{ id:SYNC_ROW_ID, data:S, updated_at:new Date().toISOString() }])
     });
     if(!r.ok) throw new Error(await r.text());
+    if(saveSeq === seqAtStart) setUnsynced(false);   // nothing new was saved while this push was in flight
     dirty=false; lastPull=Date.now(); setSync("synced ✓");
   }catch(e){ console.error(e); setSync("offline — saved here"); }
 }
@@ -421,7 +455,16 @@ async function pullRemote(force){
     if(!r.ok) throw new Error(await r.text());
     const rows = await r.json();
     if(rows.length && rows[0].data){
-      if(stableStr(rows[0].data) !== stableStr(S)){ S = Object.assign(defaultState(), rows[0].data); saveLocal(); renderKeepingInputs(); }
+      const remote = rows[0].data;
+      if(stableStr(remote) !== stableStr(S)){
+        if(force && hasLocalCopy && hasUnsynced()){
+          const merged = mergeStates(remote, S);
+          const added = stableStr(merged) !== stableStr(Object.assign(defaultState(), remote));
+          S = merged; saveLocal(); renderKeepingInputs();
+          if(added){ await pushRemote(); toast("Added reading saved on this phone to the shared passport."); return; }
+        } else { S = Object.assign(defaultState(), remote); saveLocal(); renderKeepingInputs(); }
+      }
+      setUnsynced(false);
       setSync("synced ✓");
     } else { await pushRemote(); }
   }catch(e){ console.error(e); setSync("offline — saved here"); }
@@ -430,6 +473,7 @@ async function pullRemote(force){
 function save(){
   saveLocal();
   if(SYNC_ON){
+    saveSeq++; setUnsynced(true);
     dirty = true; setSync("saving…");
     clearTimeout(saveTimer);
     saveTimer = setTimeout(pushRemote, 700);
@@ -437,7 +481,7 @@ function save(){
 }
 
 async function boot(){
-  try{ const raw = localStorage.getItem(LS_KEY); if(raw) S = Object.assign(defaultState(), JSON.parse(raw)); }catch(e){}
+  try{ const raw = localStorage.getItem(LS_KEY); if(raw){ S = Object.assign(defaultState(), JSON.parse(raw)); hasLocalCopy = true; } }catch(e){}
   if(SYNC_ON){ setSync("connecting…"); await pullRemote(true); setInterval(()=>pullRemote(false), 15000); }
   else setSync("this device only");
   if(checkMilestones()) save();
